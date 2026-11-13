@@ -1,0 +1,7 @@
+__pycache__/
+*.raw
+*.wav
+*.mp3
+*.c2
+pylib/
+.venv/

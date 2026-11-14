@@ -35,6 +35,16 @@ QR の誤り訂正はレベル M。紙に印刷して多少傷んでも読める
 - **スマートフォン** — その場で録音して QR を表示、紙の QR をカメラで
   読んで即再生（ネットワーク機能を持ちません）
 
+Web アプリは [tanep3.github.io/Voice2QR](https://tanep3.github.io/Voice2QR/)
+から、ブラウザでそのまま使えます（インストール不要）。
+
+## 開発者向け
+
+Voice2QR の機能は JavaScript ライブラリとしても公開しています。
+自分の Web ページやツールから「声を QR に入れる／取り出す」が
+できます。使い方は [API リファレンス](docs/api-reference.md) を
+ご覧ください。
+
 ## フォーマットと検証コード
 
 データフォーマット「QV」の仕様は [docs/format.md](docs/format.md) にあります。

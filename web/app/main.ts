@@ -110,13 +110,33 @@ async function main(): Promise<void> {
 
   const recorder = new Recorder();
   let encoder: Lib.Encoder | null = null;
-  let pushChain: Promise<void> = Promise.resolve();
   let currentPayload: Uint8Array | null = null;
   let maxDurationMs = 0;
   let capacity = CAPACITY[settings.ecLevel];
 
+  // Recording pipeline: worklet chunks land in a queue; ONE drain loop
+  // pushes them into the encoder in order. Stops (manual or capacity)
+  // only set a flag — finalization happens in the drain loop, never
+  // inside a queued step. (An earlier chain-based version deadlocked:
+  // the capacity auto-stop awaited the very promise chain it was part
+  // of, freezing the UI with no QR — hit at high bps, where capacity
+  // arrives before a manual stop.)
+  let pcmQueue: Int16Array[] = [];
+  let draining = false;
+  let stopRequested: 'manual' | 'capacity' | null = null;
+  let finalizeStarted = false;
+
   function refreshRecordButton(): void {
     btnRecord.textContent = recorder.recording ? t('stop') : t('record');
+    btnRecord.classList.toggle('recording', recorder.recording);
+  }
+
+  // During field debugging the error area shows the raw error code
+  // (e.g. "Error: TOO_LARGE") instead of a generic sentence — a
+  // generic message cost us a full round-trip on 2026-11-14.
+  function describeError(e: unknown): string {
+    if (e instanceof lib.Voice2QrError) return `Error: ${e.code} — ${e.message}`;
+    return `Error: ${e instanceof Error ? e.message : String(e)}`;
   }
 
   function showPayload(payload: Uint8Array): void {
@@ -124,38 +144,95 @@ async function main(): Promise<void> {
     createResult.hidden = false;
     createError.textContent = '';
     void (async () => {
-      const matrix = await v2q.payloadToQr(payload, { ecLevel: settings.ecLevel });
-      browser.drawQr(qrCanvas, matrix, { modulePx: 6 });
-      const info = await v2q.inspect(payload);
-      const sec = info.voice ? (info.voice.durationMs / 1000).toFixed(1) : '0';
-      resultInfo.textContent = t('resultInfo', { sec, bytes: payload.length });
+      try {
+        const matrix = await v2q.payloadToQr(payload, { ecLevel: settings.ecLevel });
+        browser.drawQr(qrCanvas, matrix, { modulePx: 6 });
+        const info = await v2q.inspect(payload);
+        const sec = info.voice ? (info.voice.durationMs / 1000).toFixed(1) : '0';
+        resultInfo.textContent = t('resultInfo', { sec, bytes: payload.length });
+      } catch (e) {
+        createError.textContent = describeError(e);
+      }
     })();
   }
 
-  async function finishRecording(capacityFull: boolean): Promise<void> {
-    if (!encoder) return;
+  async function finalizeRecording(): Promise<void> {
+    if (finalizeStarted || !encoder) return;
+    finalizeStarted = true;
     const enc = encoder;
+    const capacityFull = stopRequested === 'capacity';
     encoder = null;
-    await recorder.stop();
+    pcmQueue = [];
+    try {
+      await recorder.stop();
+    } catch {
+      // A failing recorder teardown must not eat the recording.
+    }
     refreshRecordButton();
-    await pushChain;
     try {
       const payload = await enc.finish();
       recStatus.textContent = capacityFull ? t('capacityFull') : '';
       showPayload(payload);
-    } catch {
-      createError.textContent = t('fileError');
+    } catch (e) {
+      createError.textContent = describeError(e);
+    }
+  }
+
+  function requestStop(kind: 'manual' | 'capacity'): void {
+    if (!stopRequested) stopRequested = kind;
+    void recorder.stop();
+    refreshRecordButton();
+    void drainQueue();
+  }
+
+  async function drainQueue(): Promise<void> {
+    if (draining) return;
+    draining = true;
+    try {
+      while (encoder && !stopRequested && pcmQueue.length > 0) {
+        const chunk = pcmQueue.shift()!;
+        const enc = encoder;
+        try {
+          await enc.push(chunk);
+        } catch (e) {
+          if (e instanceof lib.Voice2QrError && e.code === 'TOO_LARGE') {
+            stopRequested = 'capacity';
+          } else {
+            createError.textContent = describeError(e);
+            stopRequested = 'manual';
+          }
+          break;
+        }
+        const frac = Math.min(1, enc.payloadBytes / capacity);
+        recProgress.value = frac * 100;
+        const remainS = Math.max(
+          0,
+          (maxDurationMs / 1000) * (1 - frac),
+        ).toFixed(0);
+        recStatus.textContent = `${t('recording')} ${t('remaining', { s: remainS })}`;
+        if (enc.payloadBytes >= capacity) stopRequested = 'capacity';
+      }
+    } finally {
+      draining = false;
+    }
+    if (stopRequested) {
+      await recorder.stop();
+      refreshRecordButton();
+      await finalizeRecording();
     }
   }
 
   async function toggleRecord(): Promise<void> {
-    if (recorder.recording) {
-      await finishRecording(false);
+    if (recorder.recording || encoder) {
+      requestStop('manual');
       return;
     }
     createError.textContent = '';
     createResult.hidden = true;
     currentPayload = null;
+    stopRequested = null;
+    finalizeStarted = false;
+    pcmQueue = [];
     try {
       capacity = CAPACITY[settings.ecLevel];
       maxDurationMs = await v2q.maxDurationMs({
@@ -163,31 +240,11 @@ async function main(): Promise<void> {
         ecLevel: settings.ecLevel,
       });
       encoder = v2q.createEncoder({ bps: settings.bps, ecLevel: settings.ecLevel });
-      pushChain = Promise.resolve();
       const enc = encoder;
       await recorder.start((chunk) => {
-        if (encoder !== enc) return;
-        pushChain = pushChain.then(async () => {
-          if (encoder !== enc) return;
-          try {
-            await enc.push(chunk);
-          } catch (e) {
-            if (e instanceof lib.Voice2QrError && e.code === 'TOO_LARGE') {
-              await finishRecording(true);
-            }
-            return;
-          }
-          const frac = Math.min(1, enc.payloadBytes / capacity);
-          recProgress.value = frac * 100;
-          const remainS = Math.max(
-            0,
-            (maxDurationMs / 1000) * (1 - frac),
-          ).toFixed(0);
-          recStatus.textContent = `${t('recording')} ${t('remaining', { s: remainS })}`;
-          if (enc.payloadBytes >= capacity) {
-            await finishRecording(true);
-          }
-        });
+        if (encoder !== enc || stopRequested) return;
+        pcmQueue.push(chunk);
+        void drainQueue();
       });
       recProgress.value = 0;
       recStatus.textContent = t('recording');
@@ -206,18 +263,27 @@ async function main(): Promise<void> {
     recStatus.textContent = t('processing');
     try {
       const pcm = await importAudioFile(file);
-      const payload = await v2q.encode(pcm, {
+      // A file longer than the QR capacity is trimmed to the first
+      // maxDuration, with a notice — the alternative (a bare error)
+      // leaves the user with no QR at all. (Judgment call, 2026-11-14.)
+      const maxMs = await v2q.maxDurationMs({
         bps: settings.bps,
         ecLevel: settings.ecLevel,
       });
-      recStatus.textContent = '';
+      const maxSamples = Math.floor((maxMs / 1000) * 8000);
+      const trimmed = pcm.length > maxSamples;
+      const used = trimmed ? pcm.subarray(0, maxSamples) : pcm;
+      const payload = await v2q.encode(used, {
+        bps: settings.bps,
+        ecLevel: settings.ecLevel,
+      });
+      recStatus.textContent = trimmed
+        ? t('trimmed', { sec: (maxMs / 1000).toFixed(1) })
+        : '';
       showPayload(payload);
-    } catch (e) {
+    } catch {
       recStatus.textContent = '';
-      createError.textContent =
-        e instanceof lib.Voice2QrError && e.code === 'TOO_LARGE'
-          ? t('capacityFull')
-          : t('fileError');
+      createError.textContent = t('fileError');
     }
   });
 
@@ -347,7 +413,13 @@ async function main(): Promise<void> {
     readError.textContent = '';
     try {
       cameraStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' },
+        video: {
+          facingMode: 'environment',
+          // Ask for the best resolution the camera has: dense QR codes
+          // (100+ modules) are starved for pixels on a 640x480 default.
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
       });
     } catch {
       readError.textContent = t('readError');
@@ -360,7 +432,9 @@ async function main(): Promise<void> {
     const canvas = document.createElement('canvas');
     cameraTimer = window.setInterval(() => {
       if (!cameraStream || video.videoWidth === 0) return;
-      const scale = Math.min(1, 800 / video.videoWidth);
+      // Keep frames near-native (cap 1920 wide): downscaling a dense
+      // QR destroys the modules the reader needs.
+      const scale = Math.min(1, 1920 / video.videoWidth);
       canvas.width = Math.round(video.videoWidth * scale);
       canvas.height = Math.round(video.videoHeight * scale);
       const ctx = canvas.getContext('2d');

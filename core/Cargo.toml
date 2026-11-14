@@ -1,0 +1,12 @@
+[package]
+name = "voice2qr-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Voice2QR shared core: QV format I/O and Codec2 binding"
+
+[lib]
+name = "voice2qr_core"
+crate-type = ["rlib", "cdylib", "staticlib"]
+
+[dependencies]

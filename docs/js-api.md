@@ -1,201 +1,264 @@
-# Voice2QR JS ライブラリ API 設計
+# Voice2QR JS ライブラリ API リファレンス
 
-GitHub Pages で公開する JS ライブラリ（システム設計 `docs/system-design.md`
-§4.1）の公開 API 設計。Web アプリ・CLI・他人の Web アプリは、
-すべてこの API に対して実装する。
+GitHub Pages で公開する JS ライブラリの公開 API。Web アプリ・CLI・
+他人の Web アプリは、すべてこの API を使って Voice2QR の機能
+（声を QR に入れる／QR から声を取り出す）を実現する。
 
 ステータス： 設計ドラフト（2026-11-14）。レビューを経て凍結する。
 
-## 1. 設計原則
+---
 
-- **環境非依存**： ブラウザでも Node でも動く。DOM に触らない。
-  環境で変わる処理（画像のピクセル化、ファイル入出力）は呼び出し側の
-  アダプタが担い、ライブラリは標準的なデータ型だけを受け取る。
-- **非同期で統一**： 初期化も各操作も Promise を返す。内部の wasm
-  呼び出しは同期だが、公開面は非同期で揃える（将来のワーカー化を
-  妨げないため）。
-- **ライブラリは言葉を持たない**： エラーはコードで返し、表示文言は
-  利用側（アプリ）が i18n で決める。ライブラリ内に利用者向け文言を
-  持たない。
-- **サンプリング変換はしない**： PCM は「8 kHz モノラル i16」が契約。
-  端末レートからの変換は録音側（アダプタ）の仕事であり、ライブラリは
-  変換済みの PCM だけを扱う。
+## 1. まず全体像： これで何ができるか
 
-## 2. データ型
+ライブラリの仕事は次の4つ。
 
-| 型 | 中身 |
-|---|---|
-| PCM | `Int16Array`。8 kHz モノラル、16 bit リトルエンディアン相当のサンプル列 |
-| ペイロード | `Uint8Array`。QV フォーマット v2 のバイト列（`docs/format.md`） |
-| `PixelData` | `{ data: Uint8Array \| Uint8ClampedArray, width: number, height: number }`。RGBA 8 bit/成分のピクセル列（ImageData と同形） |
-| `QrMatrix` | QR のモジュール行列（§5） |
+1. **符号化**： 録音した声（PCM）を QV ペイロード（バイト列）に変える
+2. **QR 化**： ペイロードを QR のモジュール行列に変える／画像から戻す
+3. **復号**： ペイロードから声（PCM）を取り出す
+4. **観測**： ペイロードの中身（声の長さ等）を調べる
 
-## 3. 初期化
+使い方はこの流れになる（ブラウザでも Node でも同じ）：
 
 ```ts
-export interface Voice2QrOptions {
-  /** コア wasm の URL。既定はライブラリ自身の場所からの相対解決。 */
-  coreUrl?: string;
-  /** Codec2 wasm の URL。既定は同上。 */
-  codec2Url?: string;
-}
+import { createVoice2Qr } from 'https://tanep3.github.io/Voice2QR/lib/v1/voice2qr.js';
 
-/** wasm を読み込んで初期化し、インスタンスを返す。 */
-export function createVoice2Qr(options?: Voice2QrOptions): Promise<Voice2Qr>;
+// 初期化（wasm を読み込む）。最初に1回だけ。
+const v2q = await createVoice2Qr();
 
-export interface Voice2Qr {
-  /** ライブラリ版と QV フォーマット版。 */
-  readonly version: { library: string; format: number };
-  inspect(payload: Uint8Array): Promise<Info>;
-  encode(pcm: Int16Array, options?: EncodeOptions): Promise<Uint8Array>;
-  createEncoder(options?: EncodeOptions): Encoder;
-  decode(payload: Uint8Array): Promise<Int16Array>;
-  maxDurationMs(options?: EncodeOptions): Promise<number>;
-  payloadToQr(payload: Uint8Array, options?: QrOptions): Promise<QrMatrix>;
-  qrToPayload(image: PixelData): Promise<Uint8Array>;
-}
+// ―― 声を QR に入れる ――
+// pcm は「8 kHz モノラル」の録音データ（Int16Array）。
+const encoder = v2q.createEncoder();        // 既定： 1200 bps / 誤り訂正 M
+await encoder.push(pcm);                    // 録音しながら少しずつ渡してもよい
+const payload = await encoder.finish();     // → Uint8Array（QV ペイロード）
+
+// ペイロードを QR のモジュール行列にする（描画は利用側）。
+const qr = await v2q.payloadToQr(payload);  // → { version, size, modules, ecLevel }
+
+// ―― QR から声を取り出す ――
+// 画像のピクセル（RGBA）からペイロードを読む。
+const back = await v2q.qrToPayload({ data, width, height });  // → Uint8Array
+
+const info = await v2q.inspect(back);       // → 中身の要約（声の長さなど）
+const pcmOut = await v2q.decode(back);      // → Int16Array（再生用 PCM）
 ```
 
-- wasm の置き場所は、既定ではライブラリモジュール自身の URL
-  （`import.meta.url`）から相対で解決する。同居配置（アプリ、
-  GitHub Pages）がそのまま成立し、自前ホストでもファイルを並べれば
-  動く。`coreUrl` / `codec2Url` は配置を分けたい場合の上書き用。
-- インスタンスは複数作れる（状態は符号化セッション単位で持ち、
-  インスタンス自体は軽い）。
+用語：
 
-## 4. 符号化・復号・観測
+- **PCM**： デジタル音声の生データ。本ライブラリでは
+  「8 kHz モノラル、16 bit サンプル列（`Int16Array`）」と約束する。
+  端末の録音レート（48 kHz 等）からの変換はライブラリの仕事ではなく、
+  録音側が済ませてから渡す。
+- **ペイロード**： QV フォーマット v2 のバイト列（`Uint8Array`）。
+  QR の中に入るデータそのもの。仕様は `docs/format.md`。
+- **モジュール**： QR の白黒のマス目1つ。
 
-```ts
-export type EcLevel = 'L' | 'M' | 'Q' | 'H';
+## 2. 関数一覧
 
-export interface EncodeOptions {
-  /** Codec2 の bps。既定 1200。 */
-  bps?: number;
-  /** QR 誤り訂正レベル。容量の上限を決める。既定 'M'。 */
-  ecLevel?: EcLevel;
-}
-
-export interface Info {
-  version: number;
-  voice?: { bps: number; frames: number; durationMs: number };
-  hasText: boolean;
-  hasImage: boolean;
-}
-```
-
-- `encode`： ワンショット符号化（ファイル取込用）。容量を超えたら
-  `TOO_LARGE` エラー。
-- `createEncoder`： 録音用のストリーミング符号化。
-
-```ts
-export interface Encoder {
-  /** PCM を追加し、フレーム境界まで内部でバッファする。 */
-  push(pcm: Int16Array): Promise<void>;
-  /** 符号化済みフレーム数。 */
-  readonly framesEncoded: number;
-  /** 完成ペイロードのバイト数（正確値）。上限との比較に使う。 */
-  readonly payloadBytes: number;
-  /** 終了してペイロードを返す。端数はゼロ詰めで最終フレーム化。 */
-  finish(): Promise<Uint8Array>;
-}
-```
-
-録音の自動停止は、`payloadBytes` が容量（ecLevel から決まる）に
-達する手前でアプリ側が `finish` を呼ぶことで行う。`push` 自体も、
-容量を超える場合は `TOO_LARGE` を投げて止める（保険）。
-
-- `decode`： ペイロードから VOICE を取り出して PCM を返す。
-  TEXT / IMAGE セクションは読み飛ばす（マルチメディア互換）。
-  再生時のサンプリングレート変換（8 kHz → 端末レート）は呼び出し側
-  （Web Audio 等）の仕事とする。
-- `inspect`： 観測専用。データを変更しない。
-- `maxDurationMs`： その bps と ecLevel で録れる上限時間。
-  カウントダウン表示の初期値に使う。
-
-容量（バイトモード、最大バージョン40）： L = 2,953 / M = 2,331 /
-Q = 1,663 / H = 1,273。ecLevel から容量を引く対応表はライブラリが
-持ち、コアへは `capacity` として渡す（コア API 設計 §3.4）。
-
-## 5. QR の生成と読取
-
-```ts
-export interface QrOptions {
-  ecLevel?: EcLevel; // 既定 'M'
-}
-
-export interface QrMatrix {
-  /** QR のバージョン（1–40）。 */
-  version: number;
-  /** 一辺のモジュール数（= 17 + 4 × version）。クワイエットゾーンを含まない。 */
-  size: number;
-  /** 行優先の 0/1。長さ size × size。 */
-  modules: Uint8Array;
-  ecLevel: EcLevel;
-}
-```
-
-- `payloadToQr`： ペイロード → モジュール行列。描画（canvas、PNG 化）は
-  環境側の仕事であり、ライブラリは行列までを返す。これにより
-  「整数倍拡大・補間なし」の描画規則は描く側が守る（ブラウザ用
-  ヘルパは §6）。
-- `qrToPayload`： `PixelData` から QR を探して生バイト列を返す。
-  見つからなければ `QR_NOT_FOUND`。QV かどうかの判定はここでは
-  しない（`inspect` / `decode` の仕事）。カメラ読取では、アプリ側が
-  フレームを繰り返し渡し、`QR_NOT_FOUND` の間は走査を続ける。
-
-## 6. ブラウザ用ヘルパ（別エントリ）
-
-DOM に触る便利関数は本体と分け、サブパスエントリ
-`voice2qr/browser` で提供する（Node 利用者を DOM 前提に巻き込まない）。
-
-```ts
-/** QrMatrix を canvas に描く。整数倍拡大、クワイエットゾーン付き。 */
-export function drawQr(canvas: HTMLCanvasElement, matrix: QrMatrix,
-                       options?: { modulePx?: number; quietZone?: number }): void;
-
-/** ペイロードから PNG の Blob を作る（保存・共有用）。 */
-export function payloadToPng(payload: Uint8Array,
-                             options?: QrOptions & { modulePx?: number }): Promise<Blob>;
-
-/** ImageData からペイロードを読む（qrToPayload のラッパ）。 */
-export function readPayloadFromImageData(image: ImageData): Promise<Uint8Array>;
-```
-
-## 7. エラー
-
-すべての失敗は `Voice2QrError`（`code` プロパティ付き）で投げる。
-
-| code | 意味 | 主な発生源 |
+| 関数 | 何をするか | 戻り値 |
 |---|---|---|
-| `LOAD` | wasm の読み込み・初期化に失敗 | createVoice2Qr |
-| `NOT_QV` | QV データではない | inspect / decode |
-| `UNSUPPORTED_VERSION` | 形式の版が未対応 | inspect / decode |
-| `MALFORMED` | 構造の破損 | inspect / decode |
-| `NO_VOICE` | VOICE セクションが無い | decode |
-| `UNSUPPORTED_BPS` | その bps に未対応 | encode / decode |
-| `TOO_LARGE` | 容量超過 | encode / Encoder |
-| `QR_NOT_FOUND` | 画像から QR が見つからない | qrToPayload |
-| `QR_TOO_LARGE` | ペイロードが QR の最大容量を超える | payloadToQr |
-| `INVALID_ARGUMENT` | 引数の不正 | 全般 |
+| `createVoice2Qr(options?)` | ライブラリを初期化する | `Promise<Voice2Qr>` |
+| `v2q.inspect(payload)` | ペイロードの中身を調べる（観測） | `Promise<Info>` |
+| `v2q.encode(pcm, options?)` | PCM を一度に符号化する | `Promise<Uint8Array>`（ペイロード） |
+| `v2q.createEncoder(options?)` | 録音用の分割符号化を開始する | `Encoder` |
+| `encoder.push(pcm)` | PCM を追加する | `Promise<void>` |
+| `encoder.finish()` | 符号化を終えてペイロードを返す | `Promise<Uint8Array>` |
+| `v2q.decode(payload)` | ペイロードから PCM を取り出す | `Promise<Int16Array>` |
+| `v2q.maxDurationMs(options?)` | 録れる上限時間（ms）を返す | `Promise<number>` |
+| `v2q.payloadToQr(payload, options?)` | ペイロードを QR 行列にする | `Promise<QrMatrix>` |
+| `v2q.qrToPayload(image)` | 画像のピクセルからペイロードを読む | `Promise<Uint8Array>` |
 
-コアのエラー（コア API 設計 §3.2）と 1 対 1 に対応させ、QR 層と
-読み込み層の分を足した。利用者向け表示への対応はアプリ側の責務
-（例： NOT_QV / NO_VOICE / MALFORMED →「読み取れませんでした」）。
+`v2q` は `createVoice2Qr()` が返したインスタンスを指す。
 
-## 8. 版と互換性
+## 3. 関数の詳細
 
-- ライブラリは SemVer。公開 URL の版（`/lib/v1/` 等）はメジャー版を
-  示し、その配下では後方互換を保つ（マイナー／パッチのみ）。
-- 破壊的変更は新しい版ディレクトリで出す。旧版は残す
-  （アプリが版を固定して読み込むため、消すと既存の利用者が壊れる）。
-- 形式（QV）の版とは独立に管理する。`version.format` で実行時に
-  形式の版を確認できる。
+### createVoice2Qr(options?)
 
-## 9. テスト
+ライブラリを初期化する。コアと Codec2 の wasm を読み込むため
+非同期（Promise）である。アプリの起動時に1回呼ぶ。
 
-- ライブラリのテストは Node で回す（環境非依存であることの担保を
-  兼ねる）。ゴールデンテストのフィクスチャ（`fixtures/`）を使い、
-  「原音声 PCM → ペイロード」が正解バイト列と一致すること、
-  「ペイロード → PCM」がスパイクの復号結果と一致することを確認する。
-- ブラウザ用ヘルパはアプリ側の動作確認で担保する（単体テストの
-  対象にしない）。
+| 引数 | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `options.coreUrl` | string | 任意 | コア wasm の URL。既定はライブラリ自身の場所からの相対解決 |
+| `options.codec2Url` | string | 任意 | Codec2 wasm の URL。既定は同上 |
+
+戻り値： `Promise<Voice2Qr>`。失敗時は `Voice2QrError`（code: `LOAD`）。
+
+インスタンスのプロパティ：
+
+| 名前 | 型 | 説明 |
+|---|---|---|
+| `v2q.version` | `{ library: string, format: number }` | ライブラリの版と、対応する QV フォーマットの版（現在 2） |
+
+### v2q.encode(pcm, options?)
+
+PCM 全体を一度に符号化してペイロードを返す。音声ファイルの取込など、
+データが手元に揃っている場合に使う。
+
+| 引数 | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `pcm` | Int16Array | 必須 | 8 kHz モノラルの音声 |
+| `options.bps` | number | 任意 | Codec2 のビットレート。既定 1200 |
+| `options.ecLevel` | 'L' \| 'M' \| 'Q' \| 'H' | 任意 | QR の誤り訂正レベル。容量の上限を決める。既定 'M' |
+
+戻り値： `Promise<Uint8Array>`（ペイロード）。
+エラー： 容量を超えたら `TOO_LARGE`、未対応の bps は `UNSUPPORTED_BPS`。
+
+### v2q.createEncoder(options?) ／ Encoder
+
+録音のように PCM が少しずつ届く場合の分割符号化。
+引数は `encode` の `options` と同じ。
+
+```ts
+const encoder = v2q.createEncoder();
+await encoder.push(chunk1);   // Int16Array を追加（フレーム境界まで内部で保持）
+await encoder.push(chunk2);
+console.log(encoder.framesEncoded);  // 符号化済みフレーム数
+console.log(encoder.payloadBytes);   // 完成ペイロードのバイト数（正確値）
+const payload = await encoder.finish();
+```
+
+| 名前 | 型 | 説明 |
+|---|---|---|
+| `encoder.push(pcm)` | Promise<void> | PCM を追加する。容量を超えたら `TOO_LARGE` |
+| `encoder.framesEncoded` | number | ここまでで符号化できたフレーム数 |
+| `encoder.payloadBytes` | number | この時点で finish した場合のペイロード長。上限（訂正 M で 2,331）との比較で録音の自動停止に使う |
+| `encoder.finish()` | Promise<Uint8Array> | 端数サンプルをゼロ詰めして最終フレームにし、ペイロードを返す |
+
+### v2q.decode(payload)
+
+ペイロードから VOICE セクションを取り出し、PCM に復号して返す。
+TEXT / IMAGE セクションが混ざっていても読み飛ばす（将来の
+マルチメディア QR の音声だけを再生できる）。
+
+| 引数 | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `payload` | Uint8Array | 必須 | QV ペイロード |
+
+戻り値： `Promise<Int16Array>`（8 kHz モノラルの PCM）。
+再生時のレート変換（8 kHz → 端末のレート）は利用側の仕事。
+エラー： `NOT_QV` / `UNSUPPORTED_VERSION` / `MALFORMED` /
+`NO_VOICE` / `UNSUPPORTED_BPS`。
+
+### v2q.inspect(payload)
+
+ペイロードを変更せず、中身の要約だけを返す（観測）。
+
+戻り値： `Promise<Info>`
+
+```ts
+{
+  version: 2,                                        // QV フォーマットの版
+  voice: { bps: 1200, frames: 216, durationMs: 8640 }, // 無ければ undefined
+  hasText: false,
+  hasImage: false
+}
+```
+
+### v2q.maxDurationMs(options?)
+
+その bps と誤り訂正レベルで録音できる上限時間をミリ秒で返す。
+録音画面のカウントダウンの初期値に使う。
+引数は `encode` の `options` と同じ。
+
+### v2q.payloadToQr(payload, options?)
+
+ペイロードを QR のモジュール行列に変換する。描画そのものはしない
+（canvas への描画や PNG 化は利用側。ブラウザ用ヘルパは §4）。
+
+| 引数 | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `payload` | Uint8Array | 必須 | QV ペイロード |
+| `options.ecLevel` | 'L' \| 'M' \| 'Q' \| 'H' | 任意 | 既定 'M' |
+
+戻り値： `Promise<QrMatrix>`
+
+```ts
+{
+  version: 30,        // QR のバージョン（1–40）
+  size: 137,          // 一辺のモジュール数（クワイエットゾーンを含まない）
+  modules: Uint8Array, // 行優先の 0/1、長さ size × size
+  ecLevel: 'M'
+}
+```
+
+エラー： QR の最大容量を超えたら `QR_TOO_LARGE`。
+
+### v2q.qrToPayload(image)
+
+画像のピクセルから QR を探し、生バイト列（ペイロード）を返す。
+QV かどうかの判定はここではしない（`inspect` / `decode` の仕事）。
+
+| 引数 | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `image.data` | Uint8Array \| Uint8ClampedArray | 必須 | RGBA ピクセル列（ImageData と同形） |
+| `image.width` | number | 必須 | 横ピクセル数 |
+| `image.height` | number | 必須 | 縦ピクセル数 |
+
+戻り値： `Promise<Uint8Array>`。
+エラー： QR が見つからなければ `QR_NOT_FOUND`。カメラ読取では、
+利用側がフレームを繰り返し渡し、`QR_NOT_FOUND` の間は走査を続ける。
+
+## 4. ブラウザ用ヘルパ（別エントリ）
+
+DOM に触る便利関数は、本体とは別のエントリ `voice2qr/browser`
+から提供する（Node 利用者を DOM 前提に巻き込まないため）。
+
+```ts
+import { drawQr, payloadToPng, readPayloadFromImageData }
+  from 'https://tanep3.github.io/Voice2QR/lib/v1/browser.js';
+```
+
+| 関数 | 何をするか |
+|---|---|
+| `drawQr(canvas, matrix, options?)` | `QrMatrix` を canvas に描く（整数倍拡大、クワイエットゾーン付き）。`options.modulePx` で1モジュールの画素数、`options.quietZone` で余白のモジュール数（既定4） |
+| `payloadToPng(payload, options?)` | ペイロードから PNG の `Blob` を作る（保存・共有用） |
+| `readPayloadFromImageData(imageData)` | `ImageData` からペイロードを読む（`qrToPayload` のラッパ） |
+
+## 5. エラー
+
+失敗はすべて `Voice2QrError` という例外で投げられ、`code` プロパティで
+種類が分かる。表示文言はライブラリでは決めず、利用側が code から
+決める（例： アプリでは `NOT_QV` / `NO_VOICE` / `MALFORMED` を
+まとめて「読み取れませんでした」と表示する）。
+
+```ts
+try {
+  const pcm = await v2q.decode(payload);
+} catch (e) {
+  if (e instanceof Voice2QrError && e.code === 'NO_VOICE') { /* ... */ }
+}
+```
+
+| code | 意味 |
+|---|---|
+| `LOAD` | wasm の読み込み・初期化に失敗した |
+| `NOT_QV` | QV データではない |
+| `UNSUPPORTED_VERSION` | 形式の版が未対応 |
+| `MALFORMED` | 構造が壊れている |
+| `NO_VOICE` | VOICE セクションが無い |
+| `UNSUPPORTED_BPS` | その bps に未対応 |
+| `TOO_LARGE` | 容量を超えた（符号化） |
+| `QR_NOT_FOUND` | 画像から QR が見つからない |
+| `QR_TOO_LARGE` | ペイロードが QR の最大容量を超える |
+| `INVALID_ARGUMENT` | 引数が不正 |
+
+コア側のエラー（コア API 設計 `docs/core-api.md` §3.2）と 1 対 1 に
+対応させ、QR 層と読み込み層の分を足してある。
+
+## 6. 設計メモ
+
+- **環境非依存**： 本体はブラウザでも Node でも動く。DOM に触る物は
+  §4 の別エントリに隔離した。環境で変わる処理（画像のピクセル化、
+  ファイル入出力）は利用側のアダプタが担う。
+- **非同期で統一**： 内部の wasm 呼び出しは同期だが、公開面は
+  Promise で揃える（将来のワーカー化を妨げないため）。
+- **容量の対応表**： 誤り訂正レベル → QR のバイト容量
+  （L = 2,953 / M = 2,331 / Q = 1,663 / H = 1,273）はライブラリが
+  持ち、コアへは上限バイト数として渡す。
+- **版と互換性**： ライブラリは SemVer。公開 URL の版（`/lib/v1/`）の
+  配下では後方互換を保ち、破壊的変更は新しい版ディレクトリで出す。
+  旧版は消さない（利用者が版を固定して読み込むため）。
+- **テスト**： ライブラリのテストは Node で回し、ゴールデンテストの
+  フィクスチャ（`fixtures/`）で「原音声 → ペイロード」と
+  「ペイロード → PCM」の一致を確認する。ブラウザ用ヘルパは
+  アプリの動作確認で担保する。

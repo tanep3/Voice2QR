@@ -20,7 +20,7 @@ GitHub Pages で公開する JS ライブラリの公開 API。Web アプリ・C
 使い方はこの流れになる（ブラウザでも Node でも同じ）：
 
 ```ts
-import { createVoice2Qr } from 'https://tanep3.github.io/Voice2QR/lib/v1/voice2qr.js';
+import { createVoice2Qr } from 'https://tanep3.github.io/Voice2QR/lib/v1/index.js';
 
 // 初期化（wasm を読み込む）。最初に1回だけ。
 const v2q = await createVoice2Qr();

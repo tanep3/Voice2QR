@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache the Codec2 build
+        uses: actions/cache@v4
+        with:
+          path: codec2/install
+          key: codec2-1.2.0-ubuntu-${{ hashFiles('.github/workflows/ci.yml') }}
+
+      # Codec2 is pinned to 1.2.0 and built from source (system design
+      # §6): the golden tests compare bytes against fixtures recorded
+      # with the 1.2 series. The tarball hash pins the source itself.
+      - name: Build Codec2 1.2.0
+        run: |
+          set -e
+          if [ -f codec2/install/lib/libcodec2.so ]; then
+            echo "cache hit — skipping build"
+            exit 0
+          fi
+          mkdir -p codec2 && cd codec2
+          curl -sL -o codec2.tar.gz \
+            https://github.com/drowe67/codec2/archive/refs/tags/1.2.0.tar.gz
+          echo "cbccae52b2c2ecc5d2757e407da567eb681241ff8dadce39d779a7219dbcf449  codec2.tar.gz" \
+            | sha256sum -c -
+          tar xzf codec2.tar.gz
+          cmake -B codec2-1.2.0/build -S codec2-1.2.0 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/codec2/install"
+          cmake --build codec2-1.2.0/build -j
+          cmake --install codec2-1.2.0/build
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Test the core (incl. golden tests)
+        env:
+          CODEC2_LIB_DIR: ${{ github.workspace }}/codec2/install/lib
+          LD_LIBRARY_PATH: ${{ github.workspace }}/codec2/install/lib
+        run: cargo test --manifest-path core/Cargo.toml

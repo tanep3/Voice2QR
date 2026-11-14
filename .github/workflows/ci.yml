@@ -82,3 +82,9 @@ jobs:
         run: |
           npm ci
           npm test
+
+      - name: Typecheck and build the web app
+        working-directory: web
+        run: |
+          npm run typecheck:app
+          npm run build:app

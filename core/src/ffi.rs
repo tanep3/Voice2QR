@@ -262,6 +262,34 @@ pub extern "C" fn qv_max_duration_ms(bps: u16, capacity: usize) -> u32 {
     engine::max_duration_ms(&LibCodec2, bps, capacity).unwrap_or(0)
 }
 
+// ---------------------------------------------------------------------------
+// WASM bridge plumbing (not part of the C ABI in qv.h)
+// ---------------------------------------------------------------------------
+//
+// The JS library needs a way to place input buffers in the core
+// module's memory and to release them. These two exports exist only in
+// the wasm build; native faces use their own memory directly.
+
+/// Allocate `size` bytes in the core module's memory. Returns null on
+/// failure. Pair with [`qv_wasm_free`] using the same size.
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn qv_wasm_alloc(size: usize) -> *mut u8 {
+    let mut buf = vec![0u8; size].into_boxed_slice();
+    let ptr = buf.as_mut_ptr();
+    std::mem::forget(buf);
+    ptr
+}
+
+/// Release a buffer from [`qv_wasm_alloc`]. `size` must match.
+#[cfg(target_arch = "wasm32")]
+#[no_mangle]
+pub extern "C" fn qv_wasm_free(ptr: *mut u8, size: usize) {
+    if !ptr.is_null() {
+        drop(unsafe { Vec::from_raw_parts(ptr, size, size) });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

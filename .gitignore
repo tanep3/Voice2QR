@@ -1,4 +1,7 @@
 target/
+codec2/src-*/
+codec2/*.tar.gz
+codec2/out/
 __pycache__/
 *.raw
 *.wav

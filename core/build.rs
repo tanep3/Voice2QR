@@ -12,6 +12,17 @@ use std::path::{Path, PathBuf};
 fn main() {
     println!("cargo:rerun-if-env-changed=CODEC2_LIB_DIR");
 
+    // WebAssembly: do not link anything. The codec2_* symbols stay
+    // undefined and become imports of the core module; the JS library
+    // satisfies them from the separately built codec2.wasm
+    // (JS-mediated linking, docs/system-design.md §3).
+    if env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("wasm32") {
+        // Keep the undefined codec2_* symbols as wasm imports instead
+        // of link errors.
+        println!("cargo:rustc-link-arg=--allow-undefined");
+        return;
+    }
+
     if let Ok(dir) = env::var("CODEC2_LIB_DIR") {
         println!("cargo:rustc-link-search=native={dir}");
         println!("cargo:rustc-link-lib=codec2");

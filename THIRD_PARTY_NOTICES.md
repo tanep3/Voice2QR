@@ -17,6 +17,24 @@ They are **not** covered by the MIT License above.
   code into its own MIT-licensed code. If you modify Codec2 itself, your
   modifications to that component must be made available under the LGPL-2.1.
 
+## QR Code generator library (Project Nayuki) — MIT
+
+- Component: qrcodegen (QR generation for the JS library)
+- Copyright: © Project Nayuki
+- License: MIT License
+- Source: https://github.com/nayuki/QR-Code-generator
+- How Voice2QR uses it: the TypeScript source is vendored unmodified
+  (except one added re-export line) at `web/lib/vendor/qrcodegen.ts`;
+  its own license header is retained in that file.
+
+## zxing-wasm — MIT (engine: ZXing-C++, Apache-2.0)
+
+- Component: zxing-wasm (QR reading for the JS library)
+- License: MIT License; the underlying ZXing-C++ engine is
+  Apache License, Version 2.0
+- Source: https://github.com/Sec-ant/zxing-wasm
+  (engine: https://github.com/zxing-cpp/zxing-cpp)
+
 ## segno — BSD-3-Clause
 
 - Component: segno QR code generator (used by the Python spike in `spike/`)

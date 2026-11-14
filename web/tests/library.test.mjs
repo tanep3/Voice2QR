@@ -24,6 +24,29 @@ async function expectCode(promise, code) {
   assert.fail(`expected Voice2QrError(${code}), but the call succeeded`);
 }
 
+// Regression guard: the library ships as plain ES modules for
+// browsers, where bare specifiers ('zxing-wasm/reader') cannot
+// resolve. Node tests cannot see that failure — Node resolves bare
+// specifiers from node_modules — so scan the built bundles directly.
+// (Found live 2026-11-14: the first browser load died on exactly this.)
+test('shipped bundles contain no bare module specifiers', async () => {
+  const { readFileSync } = await import('node:fs');
+  for (const f of ['index.js', 'browser.js']) {
+    const src = readFileSync(new URL(`../dist/${f}`, import.meta.url), 'utf8');
+    const specs = [...src.matchAll(/(?:from\s+|import\s*\(\s*)['"]([^'"]+)['"]/g)]
+      .map((m) => m[1]);
+    const bare = specs.filter(
+      (s) =>
+        !s.startsWith('./') &&
+        !s.startsWith('../') &&
+        !s.startsWith('/') &&
+        !s.startsWith('node:') &&
+        !s.startsWith('data:'),
+    );
+    assert.deepEqual(bare, [], `${f} has bare specifiers: ${[...new Set(bare)]}`);
+  }
+});
+
 test('version reports library and format', () => {
   assert.deepEqual(v2q.version, { library: '0.1.0', format: 2 });
 });

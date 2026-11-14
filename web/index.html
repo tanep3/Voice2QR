@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Voice2QR</title>
+<meta name="description" content="Put a real voice in a QR code" />
+<link rel="manifest" href="./manifest.webmanifest" />
+<link rel="icon" href="./icon-192.png" />
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; margin: 0 auto; max-width: 560px; padding: 16px; color: #1a1a1a; background: #fff; }
+  header h1 { font-size: 28px; margin: 8px 0 0; }
+  header p { margin: 4px 0 12px; color: #555; }
+  nav.tabs { display: flex; gap: 8px; margin: 12px 0; }
+  nav.tabs button { flex: 1; padding: 10px; font-size: 16px; border: 1px solid #999; background: #f2f2f2; border-radius: 8px; cursor: pointer; }
+  nav.tabs button.active { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
+  section.view { display: none; }
+  section.view.active { display: block; }
+  button.action { padding: 10px 16px; font-size: 16px; border-radius: 8px; border: 1px solid #999; background: #fff; cursor: pointer; }
+  button.action.primary { background: #c62828; border-color: #c62828; color: #fff; font-size: 18px; padding: 12px 20px; }
+  button.action:disabled { opacity: 0.45; cursor: default; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+  progress { width: 100%; height: 18px; }
+  .status { min-height: 1.4em; color: #333; }
+  .error { color: #c62828; font-weight: 600; }
+  canvas#qr { image-rendering: pixelated; border: 1px solid #ddd; max-width: 100%; height: auto; }
+  video#camera { width: 100%; border-radius: 8px; background: #000; }
+  details.settings { margin: 16px 0; border-top: 1px solid #ddd; padding-top: 8px; }
+  details.settings label { display: block; margin: 8px 0; font-size: 14px; }
+  details.settings select { font-size: 14px; padding: 4px; margin-left: 8px; }
+  footer { margin-top: 24px; color: #666; font-size: 13px; border-top: 1px solid #ddd; padding-top: 8px; }
+  #print-area { display: none; }
+  @media print {
+    body > *:not(#print-area) { display: none !important; }
+    #print-area { display: block !important; }
+    #print-area img { display: block; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Voice2QR</h1>
+  <p data-i18n="tagline">声を QR コードに入れる</p>
+</header>
+
+<nav class="tabs">
+  <button id="tab-create" class="active" type="button" data-i18n="tabCreate">つくる</button>
+  <button id="tab-read" type="button" data-i18n="tabRead">よむ</button>
+</nav>
+
+<section id="view-create" class="view active">
+  <div class="row">
+    <button id="btn-record" class="action primary" type="button" data-i18n="record">● 録音する</button>
+    <span id="rec-status" class="status"></span>
+  </div>
+  <progress id="rec-progress" value="0" max="100"></progress>
+  <div class="row">
+    <span data-i18n="importLabel">または音声ファイルから</span>
+    <input id="file-audio" type="file" accept="audio/*" />
+  </div>
+  <div id="create-result" hidden>
+    <canvas id="qr"></canvas>
+    <div class="row"><span id="result-info" class="status"></span></div>
+    <div class="row">
+      <button id="btn-save" class="action" type="button" data-i18n="savePng">PNG を保存</button>
+      <button id="btn-print" class="action" type="button" data-i18n="print">印刷</button>
+      <button id="btn-preview" class="action" type="button" data-i18n="play">再生</button>
+    </div>
+  </div>
+  <div id="create-error" class="status error"></div>
+</section>
+
+<section id="view-read" class="view">
+  <div class="row">
+    <span data-i18n="readImageLabel">QR 画像を選ぶ</span>
+    <input id="file-image" type="file" accept="image/*" />
+  </div>
+  <div class="row">
+    <button id="btn-camera" class="action" type="button" data-i18n="cameraStart">カメラで読む</button>
+    <span id="read-status" class="status"></span>
+  </div>
+  <video id="camera" autoplay playsinline muted hidden></video>
+  <div id="read-result" hidden>
+    <div class="row"><span id="read-info" class="status"></span></div>
+    <div class="row">
+      <button id="btn-play" class="action" type="button" data-i18n="play">再生</button>
+    </div>
+  </div>
+  <div id="read-error" class="status error"></div>
+</section>
+
+<details class="settings">
+  <summary data-i18n="settings">設定</summary>
+  <label><span data-i18n="language">言語</span>
+    <select id="sel-lang">
+      <option value="ja">日本語</option>
+      <option value="en">English</option>
+    </select>
+  </label>
+  <label><span data-i18n="bps">ビットレート（上級者向け）</span>
+    <select id="sel-bps">
+      <option value="3200">3200 bps</option>
+      <option value="2400">2400 bps</option>
+      <option value="1600">1600 bps</option>
+      <option value="1400">1400 bps</option>
+      <option value="1300">1300 bps</option>
+      <option value="1200" selected>1200 bps</option>
+      <option value="700">700C bps</option>
+    </select>
+  </label>
+  <label><span data-i18n="ecLevel">誤り訂正（上級者向け）</span>
+    <select id="sel-ec">
+      <option value="L">L</option>
+      <option value="M" selected>M</option>
+      <option value="Q">Q</option>
+      <option value="H">H</option>
+    </select>
+  </label>
+</details>
+
+<footer data-i18n="footer">処理はすべてこの端末の中で行います。録音データは保存されません。</footer>
+
+<div id="print-area"><img id="print-qr" alt="" /></div>
+
+<script type="module" src="./app/main.ts"></script>
+</body>
+</html>

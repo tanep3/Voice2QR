@@ -46,3 +46,39 @@ jobs:
           CODEC2_LIB_DIR: ${{ github.workspace }}/codec2/install/lib
           LD_LIBRARY_PATH: ${{ github.workspace }}/codec2/install/lib
         run: cargo test --manifest-path core/Cargo.toml
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install Emscripten (emsdk)
+        run: |
+          git clone -q --depth 1 https://github.com/emscripten-core/emsdk.git "$HOME/emsdk"
+          cd "$HOME/emsdk"
+          ./emsdk install latest
+          ./emsdk activate latest
+
+      - name: Build codec2.wasm
+        run: |
+          source "$HOME/emsdk/emsdk_env.sh"
+          codec2/build-wasm.sh
+
+      - name: Build the core wasm
+        run: >
+          cargo build --manifest-path core/Cargo.toml
+          --target wasm32-unknown-unknown --release
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Test the JS library
+        working-directory: web
+        run: |
+          npm ci
+          npm test

@@ -10,6 +10,21 @@
 
 use crate::{Error, Result};
 use std::os::raw::{c_int, c_short, c_uchar, c_void};
+use std::sync::Mutex;
+
+/// libcodec2 keeps process-global mutable state — `codec2_rand()` in
+/// sine.c is a static PRNG shared by all sessions (upstream flags it
+/// with a "should probably be in some states" todo) — and is not
+/// documented as thread-safe. All libcodec2 entry points in this module
+/// therefore run under one lock, so concurrent callers can never race
+/// that state. Voice frames are tiny and human-paced, so the
+/// serialization costs nothing in practice, and it makes the whole core
+/// (and thus the C ABI) safe to call from multiple threads.
+static CODEC2_LOCK: Mutex<()> = Mutex::new(());
+
+fn codec2_lock() -> std::sync::MutexGuard<'static, ()> {
+    CODEC2_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 /// Frame geometry of one Codec2 mode.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -100,6 +115,7 @@ unsafe impl Send for RawSession {}
 impl RawSession {
     fn new(bps: u16) -> Result<Self> {
         let mode = mode_number(bps).ok_or(Error::UnsupportedBps(bps))?;
+        let _guard = codec2_lock();
         let state = unsafe { codec2_create(mode) };
         if state.is_null() {
             return Err(Error::Codec("codec2_create returned null"));
@@ -113,6 +129,7 @@ impl RawSession {
 
 impl Drop for RawSession {
     fn drop(&mut self) {
+        let _guard = codec2_lock();
         unsafe { codec2_destroy(self.state) }
     }
 }
@@ -121,6 +138,7 @@ impl EncodeSession for RawSession {
     fn encode_frame(&mut self, samples: &[i16], out: &mut [u8]) {
         debug_assert_eq!(samples.len(), self.info.samples_per_frame);
         debug_assert_eq!(out.len(), self.info.bytes_per_frame);
+        let _guard = codec2_lock();
         unsafe {
             codec2_encode(self.state, out.as_mut_ptr(), samples.as_ptr());
         }
@@ -131,6 +149,7 @@ impl DecodeSession for RawSession {
     fn decode_frame(&mut self, frame: &[u8], out: &mut [i16]) {
         debug_assert_eq!(frame.len(), self.info.bytes_per_frame);
         debug_assert_eq!(out.len(), self.info.samples_per_frame);
+        let _guard = codec2_lock();
         unsafe {
             codec2_decode(self.state, out.as_mut_ptr(), frame.as_ptr());
         }

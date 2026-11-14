@@ -4,5 +4,7 @@ __pycache__/
 *.wav
 *.mp3
 *.c2
+fixtures/*.bin
+fixtures/*.png
 pylib/
 .venv/

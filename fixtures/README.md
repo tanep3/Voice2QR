@@ -7,10 +7,10 @@ fixed test sentence, 8.64 s, 8 kHz mono.
 - `payload_1200.bin` — the exact QV **v1** payload from the spike:
   7-byte header ("QV", ver 1, bps 1200, 216 frames) + 1,296 bytes of
   Codec2 frames = **1,303 bytes**. The format has since been revised
-  to v2 (section-based; see `docs/format.md`) before any release, so
-  golden fixtures will be regenerated in v2 when the core is built.
-  The Codec2 frames are unchanged: a v2 payload for the same source
-  is 1,306 bytes and still fits QR Version 30 at error level M.
+  to v2 (section-based; see `docs/format.md`) before any release, and
+  the v2 fixture below has been generated. The Codec2 frames are
+  unchanged: a v2 payload for the same source is 1,306 bytes and
+  still fits QR Version 30 at error level M.
 - `payload_2400.bin` — same voice at 2400 bps (2,599 bytes, 432 frames),
   kept as a reference for the rejected-for-print mode.
 - `payload_v2_1200.bin` — the QV **v2** payload for the same source
@@ -18,6 +18,12 @@ fixed test sentence, 8.64 s, 8 kHz mono.
   (`core/examples/gen_fixture.rs`). The golden tests in `core/tests/`
   check that the core's encoder reproduces this payload and the v1
   frames byte for byte, and that its decoder reproduces the spike's PCM.
+- `expected/` — the **CI anchors** (plain text, stored in git): the
+  expected payload (hex) and decoded-PCM digest (SHA-256) for a
+  deterministic synthetic signal generated in code
+  (`core/testutil/shared.rs`), recorded against Codec2 1.2.0.
+  CI builds the fixtures from these anchors instead of binary files;
+  regenerate with `core/examples/gen_ci_fixtures.rs`.
 - `golden_source_8k.wav` — the source voice as an 8 kHz mono WAV
   (the encoder input for the golden tests).
 - `golden_decoded_1200.wav` — the spike's decoded PCM at 1200 bps
@@ -31,6 +37,13 @@ fixed test sentence, 8.64 s, 8 kHz mono.
   scale, for print-size intuition.
 
 Note on locations: the binary fixtures themselves (`.bin` / `.png` /
-`.mp3`) are excluded from the Google Drive mirror of this folder, the
-same way build artifacts are ignored in git. They live in the master
-copy of this folder on Muse's development VM.
+`.mp3` / `.wav`) are not stored in git — they live in the master copy
+of this folder on Muse's development VM and form the local evidence
+tier (tests using them skip when they are absent). CI relies on the
+text anchors under `expected/` instead.
+
+Note on decoding: libcodec2's phase model and postfilter draw random
+phases from a process-global PRNG (`codec2_rand()` in sine.c), which
+every decode advances and encoding never touches. Only the first
+decode in a process reproduces a reference PCM byte for byte, so the
+golden tests perform decode checks in a fresh child process.

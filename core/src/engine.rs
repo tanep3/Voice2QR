@@ -148,6 +148,12 @@ pub fn encode<C: Codec>(codec: C, pcm: &[i16], bps: u16, capacity: usize) -> Res
 /// Decode a payload's VOICE section to 8 kHz mono PCM.
 /// Other sections (TEXT, IMAGE, unknown) are skipped — this is what lets
 /// a Voice2QR reader play just the voice of a multimedia payload.
+///
+/// Note: libcodec2's phase model draws random phases from a
+/// process-global PRNG, so two decodes of the same payload in one
+/// process can differ slightly in the randomized-phase components
+/// (inaudible; the first decode in a process is the reference decode).
+/// Encoding, by contrast, is a pure function of the input PCM.
 pub fn decode<C: Codec>(codec: &C, payload: &[u8]) -> Result<Vec<i16>> {
     let p = Payload::parse(payload)?;
     let voice = p.voice().ok_or(Error::NoVoiceSection)?;

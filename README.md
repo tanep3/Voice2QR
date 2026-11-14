@@ -37,7 +37,7 @@ QR の誤り訂正はレベル M。紙に印刷して多少傷んでも読める
 
 ## フォーマットと検証コード
 
-データフォーマット「QV」の仕様は `docs/format.md` にあります。
+データフォーマット「QV」の仕様は [docs/format.md](docs/format.md) にあります。
 方式の検証コードと照合用データは `spike/` と `fixtures/` にあります
 （音声 → 符号化 → QR 生成 → 生成画像の読み戻しでバイト列が完全一致し、
 復号した声が聞き取れることを確認済みです）。
@@ -58,6 +58,6 @@ a QR code. The voice is parameterized with the Codec2 speech codec at
 1,200 bit/s and stored in the QR code's byte mode with error correction
 level M: about 15 seconds of voice per code. Print the code on paper, scan
 it, and the voice plays back — fully offline, no server, no account.
-PC and smartphone apps share one format (`docs/format.md`). Voice2QR code
+PC and smartphone apps share one format ([docs/format.md](docs/format.md)). Voice2QR code
 is MIT-licensed; Codec2 is a separate LGPL-2.1 component (see
 `THIRD_PARTY_NOTICES.md`).

@@ -1,1 +1,4 @@
-3e679da922ece8f8a66d10a2b8accc33a94cec7c3c747bcc929f0e43c29aef1e
+Superseded. The decode anchor is now synthetic_1200_decoded.hex in this
+directory: decoded PCM is compared with a tolerance, not a digest,
+because it varies at the LSB level across floating-point environments.
+See fixtures/README.md.

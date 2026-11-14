@@ -2,8 +2,10 @@
 //! usual text-only routes):
 //!   fixtures/expected/synthetic_1200_payload.hex   — expected QV payload
 //!     for the deterministic synthetic signal at 1200 bps / capacity M
-//!   fixtures/expected/synthetic_1200_decoded.sha256 — SHA-256 of the
-//!     decoded PCM (little-endian int16 bytes)
+//!   fixtures/expected/synthetic_1200_decoded.hex   — reference decoded
+//!     PCM (little-endian int16 bytes, hex). Decoded PCM is compared
+//!     with a tolerance, not byte-exactly: it varies at the LSB level
+//!     across floating-point environments (see core/tests/golden.rs).
 //!
 //! Run from the repository root (needs libcodec2, like the core):
 //!   cargo run --example gen_ci_fixtures --manifest-path core/Cargo.toml
@@ -35,13 +37,14 @@ fn main() {
         .expect("write payload anchor");
     println!("payload anchor: {} bytes", payload.len());
 
+    // This decode is the process's first (encoding consumes no
+    // codec2_rand), so it is the reference decode.
     let decoded = engine::decode(&LibCodec2, &payload).expect("decode");
     let mut le = Vec::with_capacity(decoded.len() * 2);
     for s in &decoded {
         le.extend_from_slice(&s.to_le_bytes());
     }
-    let digest = shared::sha256_hex(&le);
-    std::fs::write(dir.join("synthetic_1200_decoded.sha256"), format!("{digest}\n"))
+    std::fs::write(dir.join("synthetic_1200_decoded.hex"), format!("{}\n", hex(&le)))
         .expect("write decoded anchor");
-    println!("decoded anchor: {digest} ({} samples)", decoded.len());
+    println!("decoded anchor: {} samples", decoded.len());
 }

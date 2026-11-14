@@ -19,11 +19,19 @@ fixed test sentence, 8.64 s, 8 kHz mono.
   check that the core's encoder reproduces this payload and the v1
   frames byte for byte, and that its decoder reproduces the spike's PCM.
 - `expected/` — the **CI anchors** (plain text, stored in git): the
-  expected payload (hex) and decoded-PCM digest (SHA-256) for a
+  expected payload (hex) and reference decoded PCM (hex) for a
   deterministic synthetic signal generated in code
   (`core/testutil/shared.rs`), recorded against Codec2 1.2.0.
   CI builds the fixtures from these anchors instead of binary files;
-  regenerate with `core/examples/gen_ci_fixtures.rs`.
+  regenerate with `core/examples/gen_ci_fixtures.rs`. The payload is
+  compared byte for byte; the decoded PCM is compared with a
+  tolerance (max |diff| 512, mean 8), because decoded samples are
+  unquantized float results that drift at the LSB level across
+  floating-point environments (libm / compiler) — measured 2026-11-14:
+  -O0 / -Ofast builds are bit-identical, a -ffast-math build drifts by
+  at most 41 LSB, and a structurally wrong decode differs by
+  thousands. The byte-exact contract of this project is the encoded
+  bitstream — that is what a QR carries.
 - `golden_source_8k.wav` — the source voice as an 8 kHz mono WAV
   (the encoder input for the golden tests).
 - `golden_decoded_1200.wav` — the spike's decoded PCM at 1200 bps

@@ -1,0 +1,74 @@
+name: Pages
+
+# Publishes the web app + JS library to GitHub Pages.
+# Runs on a version tag (the release flow) or manually from the
+# Actions tab. The repository's Pages source must be set to
+# "GitHub Actions" (Settings -> Pages) once.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install Emscripten (emsdk)
+        run: |
+          git clone -q --depth 1 https://github.com/emscripten-core/emsdk.git "$HOME/emsdk"
+          cd "$HOME/emsdk"
+          ./emsdk install latest
+          ./emsdk activate latest
+
+      - name: Build codec2.wasm
+        run: |
+          source "$HOME/emsdk/emsdk_env.sh"
+          sh codec2/build-wasm.sh
+
+      - name: Build the core wasm
+        run: >
+          cargo build --manifest-path core/Cargo.toml
+          --target wasm32-unknown-unknown --release
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # Same gate as CI: the site is only published when the library
+      # tests pass and the app builds.
+      - name: Test the library and build the site
+        working-directory: web
+        run: |
+          npm ci
+          npm test
+          npm run typecheck:app
+          npm run build:app
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

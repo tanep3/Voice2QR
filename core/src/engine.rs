@@ -119,12 +119,24 @@ impl<C: Codec> Encoder<C> {
     }
 
     /// Finish and return the QV payload. Leftover samples (less than one
-    /// frame) are zero-padded into a final frame.
+    /// frame) are zero-padded into a final frame — unless that final
+    /// frame no longer fits the capacity, in which case it is dropped
+    /// instead of failing the whole recording. That case is real, not
+    /// hypothetical: at the 20 ms modes (3200/2400 bps) one streamed
+    /// chunk holds two frames, so a push that overflows mid-chunk can
+    /// leave a partial frame behind; the audio it holds is past the QR
+    /// capacity anyway, so nothing the payload could carry is lost.
     pub fn finish(mut self) -> Result<Vec<u8>> {
         if !self.pending.is_empty() {
             let mut last = std::mem::take(&mut self.pending);
             last.resize(self.mode.samples_per_frame, 0);
-            self.encode_one_frame(&last)?;
+            let projected =
+                VOICE_ONLY_OVERHEAD + self.frames.len() + self.mode.bytes_per_frame;
+            if projected <= self.capacity {
+                self.encode_one_frame(&last)?;
+            }
+            // else: drop the trailing partial frame; the payload built
+            // from the frames that did fit is still returned.
         }
         if self.frame_count > u16::MAX as u32 {
             return Err(Error::InvalidArgument("recording too long for QV frame count"));
@@ -256,6 +268,43 @@ mod tests {
             decode(&LibCodec2, &p.build()),
             Err(Error::NoVoiceSection)
         ));
+    }
+
+    #[test]
+    fn streaming_to_capacity_at_20ms_modes_still_finishes() {
+        // Regression (found live 2026-11-14): at 3200/2400 bps the
+        // worklet's 320-sample chunk is two frames, so a push that
+        // overflows mid-chunk leaves a partial frame behind and the
+        // old finish() failed the whole recording with TOO_LARGE.
+        // 1200 bps never hit this: one chunk is exactly one frame.
+        for bps in [3200u16, 2400] {
+            let mut enc =
+                Encoder::new(LibCodec2, bps, QR_CAPACITY_M).unwrap();
+            let chunk = vec![1000i16; 320];
+            let mut pushed = 0;
+            loop {
+                match enc.push_pcm(&chunk) {
+                    Ok(()) => pushed += 1,
+                    Err(Error::PayloadTooLarge { .. }) => break,
+                    Err(e) => panic!("unexpected error at {bps} bps: {e:?}"),
+                }
+                assert!(pushed < 1000, "capacity never hit at {bps} bps");
+            }
+            let payload = enc.finish().expect("finish must succeed");
+            assert!(payload.len() <= QR_CAPACITY_M);
+            let parsed = Payload::parse(&payload).unwrap();
+            let v = parsed.voice().unwrap();
+            assert_eq!(v.bps, bps);
+            // Full to the last whole frame the capacity holds:
+            // (2331 - 10) / 8 = 290 frames at 3200 bps,
+            // (2331 - 10) / 6 = 386 frames at 2400 bps.
+            let bytes_per_frame = match bps {
+                3200 => 8,
+                _ => 6,
+            };
+            let max_frames = (QR_CAPACITY_M - VOICE_ONLY_OVERHEAD) / bytes_per_frame;
+            assert_eq!(v.frame_count as usize, max_frames);
+        }
     }
 
     #[test]

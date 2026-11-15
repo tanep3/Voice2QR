@@ -75,7 +75,20 @@
   canvas#qr {
     image-rendering: pixelated; background: #fff; border: 3px dashed #ff9ecf; border-radius: 20px;
     padding: 10px; max-width: 100%; height: auto; box-shadow: 0 8px 18px rgba(214, 141, 196, .25);
+    cursor: pointer;
   }
+  #qr-modal {
+    position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 16px; padding: 20px;
+    background: rgba(74, 53, 85, .55);
+  }
+  #qr-modal[hidden] { display: none; }
+  canvas#qr-big {
+    image-rendering: pixelated; background: #fff; border-radius: 20px; padding: 12px;
+    max-width: 92vw; max-height: 76vh; width: auto; height: auto;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, .35);
+  }
+  #qr-modal .row { justify-content: center; }
   video#camera { width: 100%; border-radius: 20px; background: #000; border: 3px solid #fff; box-shadow: 0 8px 18px rgba(176, 141, 214, .3); }
   input[type="file"] { font-family: inherit; font-size: 14px; color: #8a6db3; max-width: 100%; }
   input[type="file"]::file-selector-button {
@@ -127,6 +140,7 @@
     <canvas id="qr"></canvas>
     <div class="row"><span id="result-info" class="status"></span></div>
     <div class="row">
+      <button id="btn-share" class="action" type="button" data-i18n="share">共有</button>
       <button id="btn-save" class="action" type="button" data-i18n="savePng">PNG を保存</button>
       <button id="btn-print" class="action" type="button" data-i18n="print">印刷</button>
       <button id="btn-preview" class="action" type="button" data-i18n="play">再生</button>
@@ -184,6 +198,14 @@
 </details>
 
 <footer data-i18n="footer">処理はすべてこの端末の中で行います。録音データは保存されません。</footer>
+
+<div id="qr-modal" hidden>
+  <canvas id="qr-big"></canvas>
+  <div class="row">
+    <button id="btn-modal-share" class="action" type="button" data-i18n="share">共有</button>
+    <button id="btn-modal-close" class="action" type="button" data-i18n="close">閉じる</button>
+  </div>
+</div>
 
 <div id="print-area"><img id="print-qr" alt="" /></div>
 

@@ -315,6 +315,59 @@ async function main(): Promise<void> {
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   });
 
+  // ----- share (Web Share API → share sheet, e.g. to the Phomemo app) --
+  // Same route as MiniMapPrint: share the PNG file; browsers without
+  // file sharing get a hint to use Save PNG instead.
+  async function shareQr(): Promise<void> {
+    if (!currentPayload) return;
+    try {
+      const blob = await browser.payloadToPng(currentPayload, {
+        ecLevel: settings.ecLevel,
+        modulePx: 10,
+      });
+      const file = new File([blob], 'voice2qr.png', { type: 'image/png' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file] });
+      } else {
+        createError.textContent = t('shareUnsupported');
+      }
+    } catch (e) {
+      // Dismissing the share sheet is not an error.
+      if (e instanceof DOMException && e.name === 'AbortError') return;
+      createError.textContent = describeError(e);
+    }
+  }
+  $<HTMLButtonElement>('btn-share').addEventListener('click', () => void shareQr());
+  $<HTMLButtonElement>('btn-modal-share').addEventListener('click', () => void shareQr());
+
+  // ----- enlarged QR (tap the QR) -----
+  const qrModal = $<HTMLElement>('qr-modal');
+  const qrBig = $<HTMLCanvasElement>('qr-big');
+  function closeModal(): void {
+    qrModal.hidden = true;
+    document.body.style.overflow = '';
+  }
+  qrCanvas.addEventListener('click', async () => {
+    if (!currentPayload) return;
+    try {
+      const matrix = await v2q.payloadToQr(currentPayload, {
+        ecLevel: settings.ecLevel,
+      });
+      browser.drawQr(qrBig, matrix, { modulePx: 10 });
+      qrModal.hidden = false;
+      document.body.style.overflow = 'hidden';
+    } catch (e) {
+      createError.textContent = describeError(e);
+    }
+  });
+  $<HTMLButtonElement>('btn-modal-close').addEventListener('click', closeModal);
+  qrModal.addEventListener('click', (e) => {
+    if (e.target === qrModal) closeModal();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !qrModal.hidden) closeModal();
+  });
+
   const btnPreview = $<HTMLButtonElement>('btn-preview');
   btnPreview.addEventListener('click', async () => {
     if (!currentPayload) return;

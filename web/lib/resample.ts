@@ -11,15 +11,25 @@
  */
 import type { PixelData } from './qr.js';
 
-/** Presented widths (px) the retry ladder tries, ascending. */
-export const LADDER_WIDTHS: readonly number[] = [1800, 2600, 3400, 4200];
+/**
+ * Presented widths (px) the retry ladder tries, ascending. The ladder
+ * sweeps presentations for one that lands in the reader's working
+ * regime; with localization cropping first, the code already fills
+ * the presented image, so extreme widths add cost (the largest step
+ * is the most expensive attempt) without measured benefit — on the
+ * reference photo the widest steps were the ones that did not read.
+ */
+export const LADDER_WIDTHS: readonly number[] = [1800, 2600, 3400];
 
 /**
- * Hard cap on a presented image's pixel count. iOS Safari silently
- * refuses canvases above 16,777,216 px, and very large inputs also
- * strain the reader's wasm memory, so ladder steps stay under this.
+ * Hard cap on a presented image's pixel count. This bounds the cost
+ * of a single retry attempt (upscale + read) — the failure path pays
+ * for every step, so the widest presentations must stay cheap. Every
+ * successful ladder read measured with the shipped reader was under
+ * this cap, and it also stays below iOS Safari's silent canvas
+ * ceiling of 16,777,216 px.
  */
-export const MAX_PRESENTED_AREA = 16_000_000;
+export const MAX_PRESENTED_AREA = 10_000_000;
 
 /**
  * A ladder step must exceed the native width by at least this factor:

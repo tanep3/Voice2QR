@@ -137,10 +137,20 @@ export async function qrToPayload(
         const hit = await tryRead(upscaleToWidth(crop, w));
         if (hit) return hit;
       }
-    }
-    for (const w of ladderWidthsFor(image.width, image.height)) {
-      const hit = await tryRead(upscaleToWidth(image, w));
-      if (hit) return hit;
+      // Safety net for a wrong crop: one full-frame step. When the
+      // crop was the real code, the full frame at a similar pitch
+      // adds nothing the crop ladder did not already try, so the
+      // remaining steps are not worth their cost on the failure path.
+      const first = ladderWidthsFor(image.width, image.height)[0];
+      if (first !== undefined) {
+        const hit = await tryRead(upscaleToWidth(image, first));
+        if (hit) return hit;
+      }
+    } else {
+      for (const w of ladderWidthsFor(image.width, image.height)) {
+        const hit = await tryRead(upscaleToWidth(image, w));
+        if (hit) return hit;
+      }
     }
   }
   throw new Voice2QrError('QR_NOT_FOUND', 'no QR code found in the image');

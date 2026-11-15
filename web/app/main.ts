@@ -512,9 +512,9 @@ async function main(): Promise<void> {
  * would happily serve the previous release forever. So the running app
  * probes the site's version.json (never cached, never intercepted by
  * the worker): if the deployed version differs from this build's, a
- * newer release exists — drop every cache, unregister the worker, and
- * reload once to pick it up. The sessionStorage marker prevents a
- * reload loop if the fresh load still reports a mismatch.
+ * newer release exists — drop this app's caches, unregister the
+ * worker, and reload once to pick it up. The sessionStorage marker
+ * prevents a reload loop if the fresh load still reports a mismatch.
  */
 async function checkForUpdate(): Promise<void> {
   try {
@@ -527,8 +527,12 @@ async function checkForUpdate(): Promise<void> {
     if (sessionStorage.getItem('v2q-reloaded-for') === data.version) return;
     sessionStorage.setItem('v2q-reloaded-for', data.version);
     if ('caches' in window) {
+      // Cache Storage is shared by the whole origin: delete only this
+      // app's own caches (same prefix rule as the worker's activate).
       const keys = await caches.keys();
-      await Promise.all(keys.map((k) => caches.delete(k)));
+      await Promise.all(
+        keys.filter((k) => k.startsWith('voice2qr-')).map((k) => caches.delete(k)),
+      );
     }
     await registration?.unregister().catch(() => undefined);
     window.location.reload();

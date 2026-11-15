@@ -62,6 +62,12 @@ API の使い方は `api-reference.md` を見ること。
 - `web/public/sw.js` の `__APP_VERSION__` プレースホルダを消さない
 - キャッシュ名の形式（`voice2qr-<version>`）を変える場合は、
   `version.json` の形式とアプリ側の比較処理も合わせて見直す
+- **キャッシュの削除は `voice2qr-` 接頭辞のものだけに限る**
+  （sw.js の activate と、アプリ側の更新チェックの両方）。
+  Cache Storage は Service Worker のスコープではなく
+  **オリジン単位**で共有される。同じホストで公開している他の
+  アプリのキャッシュまで消すと、そのアプリのオフライン動作を
+  壊してしまう
 
 ## 混同しやすい別物
 

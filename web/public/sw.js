@@ -11,7 +11,8 @@
 // HTML itself is never more than one load behind; version.json is
 // never intercepted (the app's update probe must see the network).
 const VERSION = '__APP_VERSION__';
-const CACHE = 'voice2qr-' + VERSION;
+const CACHE_PREFIX = 'voice2qr-';
+const CACHE = CACHE_PREFIX + VERSION;
 const ASSETS = [
   './',
   './index.html',
@@ -33,8 +34,18 @@ self.addEventListener('install', (event) => {
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
+    // Cache Storage is shared by the whole ORIGIN, not by this
+    // worker's scope: other apps served from the same host (e.g.
+    // other project sites on a user Pages domain) keep their caches
+    // in the same store. Only ever delete caches with our own
+    // prefix — cleaning up a neighbour's cache would break their
+    // offline behaviour.
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))),
+      Promise.all(
+        keys
+          .filter((k) => k.startsWith(CACHE_PREFIX) && k !== CACHE)
+          .map((k) => caches.delete(k)),
+      ),
     ).then(() => self.clients.claim()),
   );
 });

@@ -8,9 +8,10 @@ import {
   qrToPayload as fromPixels,
   type EcLevel,
   type QrMatrix,
+  type QrReadOptions,
 } from './qr.js';
 
-export type { EcLevel, QrMatrix };
+export type { EcLevel, QrMatrix, QrReadOptions };
 
 export interface DrawOptions {
   /** Pixels per module. Default 4. */
@@ -62,10 +63,12 @@ export async function payloadToPng(
 /** Read a payload from an ImageData (e.g. from a canvas or camera frame). */
 export async function readPayloadFromImageData(
   imageData: ImageData,
+  options?: QrReadOptions,
 ): Promise<Uint8Array> {
   const href = new URL('./zxing_reader.wasm', import.meta.url).href;
   return fromPixels(
     { data: imageData.data, width: imageData.width, height: imageData.height },
     href,
+    options,
   );
 }

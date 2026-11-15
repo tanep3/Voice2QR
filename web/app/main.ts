@@ -10,6 +10,9 @@
  */
 import type * as Lib from '../lib/index.js';
 import type * as LibBrowser from '../lib/browser.js';
+
+/** Build-time constant injected by vite.config.ts (package.json "appVersion"). */
+declare const __APP_VERSION__: string;
 import { loadSettings, saveSettings, type Settings } from './settings.js';
 import { applyI18n, setLang, t, type Lang } from './i18n.js';
 import { Recorder } from './recorder.js';
@@ -343,6 +346,8 @@ async function main(): Promise<void> {
   let readPayload: Uint8Array | null = null;
   let cameraStream: MediaStream | null = null;
   let cameraTimer: number | null = null;
+  let cameraScanStart = 0;
+  let cameraLastLadder = 0;
 
   async function acceptPayload(payload: Uint8Array): Promise<void> {
     readError.textContent = '';
@@ -380,11 +385,14 @@ async function main(): Promise<void> {
       if (!ctx) throw new Error('no 2d context');
       ctx.drawImage(bitmap, 0, 0);
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const payload = await v2q.qrToPayload({
-        data: imageData.data,
-        width: imageData.width,
-        height: imageData.height,
-      });
+      const payload = await v2q.qrToPayload(
+        {
+          data: imageData.data,
+          width: imageData.width,
+          height: imageData.height,
+        },
+        { scaleRetry: true },
+      );
       await acceptPayload(payload);
     } catch {
       readPayload = null;
@@ -429,6 +437,8 @@ async function main(): Promise<void> {
     video.hidden = false;
     btnCamera.textContent = t('cameraStop');
     readStatus.textContent = t('scanning');
+    cameraScanStart = Date.now();
+    cameraLastLadder = 0;
     const canvas = document.createElement('canvas');
     cameraTimer = window.setInterval(() => {
       if (!cameraStream || video.videoWidth === 0) return;
@@ -441,12 +451,25 @@ async function main(): Promise<void> {
       if (!ctx) return;
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      // Live reads run on fresh frames at the normal cadence. When a
+      // scan has failed continuously for a few seconds (a static setup,
+      // e.g. a low-resolution PC camera facing a print, where the
+      // presentation scale never changes on its own), spend one tick on
+      // the scale-ladder retry, at most once every few seconds, so the
+      // live cadence is not disturbed.
+      const now = Date.now();
+      const useLadder =
+        now - cameraScanStart > 3000 && now - cameraLastLadder > 3000;
+      if (useLadder) cameraLastLadder = now;
       void v2q
-        .qrToPayload({
-          data: imageData.data,
-          width: imageData.width,
-          height: imageData.height,
-        })
+        .qrToPayload(
+          {
+            data: imageData.data,
+            width: imageData.width,
+            height: imageData.height,
+          },
+          { scaleRetry: useLadder },
+        )
         .then(async (payload) => {
           await stopCamera();
           await acceptPayload(payload);
@@ -480,6 +503,37 @@ async function main(): Promise<void> {
     } catch {
       // Not a secure context or no SW support: the app still works.
     }
+  }
+  void checkForUpdate();
+}
+
+/**
+ * Static hosting cannot push updates, and a cache-first service worker
+ * would happily serve the previous release forever. So the running app
+ * probes the site's version.json (never cached, never intercepted by
+ * the worker): if the deployed version differs from this build's, a
+ * newer release exists — drop every cache, unregister the worker, and
+ * reload once to pick it up. The sessionStorage marker prevents a
+ * reload loop if the fresh load still reports a mismatch.
+ */
+async function checkForUpdate(): Promise<void> {
+  try {
+    const registration = await navigator.serviceWorker?.getRegistration();
+    await registration?.update().catch(() => undefined);
+    const response = await fetch('./version.json', { cache: 'no-store' });
+    if (!response.ok) return;
+    const data = (await response.json()) as { version?: string };
+    if (!data.version || data.version === __APP_VERSION__) return;
+    if (sessionStorage.getItem('v2q-reloaded-for') === data.version) return;
+    sessionStorage.setItem('v2q-reloaded-for', data.version);
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+    await registration?.unregister().catch(() => undefined);
+    window.location.reload();
+  } catch {
+    // Offline, or no version.json (dev server): nothing to update to.
   }
 }
 

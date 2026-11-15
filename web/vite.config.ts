@@ -1,6 +1,14 @@
 import { defineConfig, type Plugin } from 'vite';
-import { createReadStream, existsSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import { extname, join } from 'node:path';
+
+// The deployed app's version (package.json "appVersion", bumped per
+// release). Injected into the bundle so the running app can compare
+// itself against the site's version.json and force a refresh when a
+// new release has been deployed under it (see app/main.ts).
+const pkg = JSON.parse(readFileSync(join(__dirname, 'package.json'), 'utf8')) as {
+  appVersion?: string;
+};
 
 // The app is a static site. `base: './'` keeps every asset reference
 // relative, so the same build works on GitHub Pages, on a home server,
@@ -10,6 +18,9 @@ import { extname, join } from 'node:path';
 // runtime from that co-located path.
 export default defineConfig({
   base: './',
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.appVersion ?? '0.0.0'),
+  },
   build: {
     outDir: 'site',
     emptyOutDir: true,

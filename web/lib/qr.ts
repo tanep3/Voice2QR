@@ -7,6 +7,8 @@
 import { prepareZXingModule, readBarcodes } from 'zxing-wasm/reader';
 import { Voice2QrError } from './errors.js';
 import { loadBytes } from './bridge.js';
+import { cropImage, locateQr } from './locate.js';
+import { ladderWidthsFor, upscaleToWidth } from './resample.js';
 import { qrcodegen } from './vendor/qrcodegen.js';
 
 export type EcLevel = 'L' | 'M' | 'Q' | 'H';
@@ -75,11 +77,22 @@ function ensureZxing(zxingWasmHref: string): Promise<void> {
   return zxingReady;
 }
 
-export async function qrToPayload(
-  image: PixelData,
-  zxingWasmHref: string,
-): Promise<Uint8Array> {
-  await ensureZxing(zxingWasmHref);
+export interface QrReadOptions {
+  /**
+   * When the direct read fails, retry harder: for a large image, first
+   * locate the code and retry on the crop (see locate.ts); then retry
+   * with the image re-presented at a ladder of larger widths
+   * (Lanczos-3 upscale, area-capped — see resample.ts). The reader is
+   * tuned for camera-scale presentations; a dense code in a small or
+   * low-resolution image can fall outside its working regime at native
+   * scale while reading fine presented larger. Off by default;
+   * enabling it only adds attempts after a failed direct read, and a
+   * hit is still the reader's own checksum-verified decode.
+   */
+  scaleRetry?: boolean;
+}
+
+async function tryRead(image: PixelData): Promise<Uint8Array | null> {
   const imageData = {
     data: image.data,
     width: image.width,
@@ -93,6 +106,42 @@ export async function qrToPayload(
   for (const r of results) {
     if (r.format === 'QRCode' && r.bytes.length > 0) {
       return new Uint8Array(r.bytes);
+    }
+  }
+  return null;
+}
+
+/**
+ * Above this area, a failed direct read first tries localization: in a
+ * large photo the code may occupy only part of the frame, where no
+ * ladder step fits the area cap — a crop is the missing step.
+ */
+const LOCATE_MIN_AREA = 8_000_000;
+
+export async function qrToPayload(
+  image: PixelData,
+  zxingWasmHref: string,
+  options?: QrReadOptions,
+): Promise<Uint8Array> {
+  await ensureZxing(zxingWasmHref);
+  const direct = await tryRead(image);
+  if (direct) return direct;
+  if (options?.scaleRetry) {
+    if (image.width * image.height >= LOCATE_MIN_AREA) {
+      const rect = locateQr(image);
+      if (rect) {
+        const crop = cropImage(image, rect);
+        const hitCrop = await tryRead(crop);
+        if (hitCrop) return hitCrop;
+        for (const w of ladderWidthsFor(crop.width, crop.height)) {
+          const hit = await tryRead(upscaleToWidth(crop, w));
+          if (hit) return hit;
+        }
+      }
+    }
+    for (const w of ladderWidthsFor(image.width, image.height)) {
+      const hit = await tryRead(upscaleToWidth(image, w));
+      if (hit) return hit;
     }
   }
   throw new Voice2QrError('QR_NOT_FOUND', 'no QR code found in the image');

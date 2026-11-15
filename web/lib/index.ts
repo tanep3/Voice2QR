@@ -14,10 +14,11 @@ import {
   type EcLevel,
   type PixelData,
   type QrMatrix,
+  type QrReadOptions,
 } from './qr.js';
 
 export { Voice2QrError, type ErrorCode } from './errors.js';
-export type { EcLevel, PixelData, QrMatrix };
+export type { EcLevel, PixelData, QrMatrix, QrReadOptions };
 
 export interface CreateOptions {
   /** Core wasm URL. Default: resolved relative to this module. */
@@ -61,7 +62,7 @@ export interface Voice2Qr {
   decode(payload: Uint8Array): Promise<Int16Array>;
   maxDurationMs(options?: EncodeOptions): Promise<number>;
   payloadToQr(payload: Uint8Array, options?: { ecLevel?: EcLevel }): Promise<QrMatrix>;
-  qrToPayload(image: PixelData): Promise<Uint8Array>;
+  qrToPayload(image: PixelData, options?: QrReadOptions): Promise<Uint8Array>;
 }
 
 const LIBRARY_VERSION = '0.1.0';
@@ -186,7 +187,7 @@ class Voice2QrImpl implements Voice2Qr {
     return toQr(payload, options?.ecLevel ?? DEFAULT_EC);
   }
 
-  async qrToPayload(image: PixelData): Promise<Uint8Array> {
+  async qrToPayload(image: PixelData, options?: QrReadOptions): Promise<Uint8Array> {
     if (
       !image ||
       !(image.data instanceof Uint8Array || image.data instanceof Uint8ClampedArray) ||
@@ -197,7 +198,7 @@ class Voice2QrImpl implements Voice2Qr {
     ) {
       throw new Voice2QrError('INVALID_ARGUMENT', 'image must be { data, width, height }');
     }
-    return fromPixels(image, this.zxingWasmHref);
+    return fromPixels(image, this.zxingWasmHref, options);
   }
 }
 

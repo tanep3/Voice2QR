@@ -2,7 +2,16 @@
 // library, and the wasm modules) so the app installs and runs fully
 // offline. No recording or payload data ever passes through here —
 // fetches of data: URLs and non-GET requests are left alone.
-const CACHE = 'voice2qr-v1';
+//
+// The cache name carries the app version (__APP_VERSION__ is stamped
+// by scripts/assemble-site.mjs at build time). A new release therefore
+// changes this file's bytes, which is what makes the browser notice
+// the update: the new worker installs a fresh cache and the activate
+// handler deletes the old one. Navigations are network-first so the
+// HTML itself is never more than one load behind; version.json is
+// never intercepted (the app's update probe must see the network).
+const VERSION = '__APP_VERSION__';
+const CACHE = 'voice2qr-' + VERSION;
 const ASSETS = [
   './',
   './index.html',
@@ -33,6 +42,21 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== 'GET' || url.origin !== self.location.origin) return;
+  if (url.pathname.endsWith('/version.json')) return; // update probe: network only
+  if (event.request.mode === 'navigate') {
+    // Network-first for the document: fresh HTML whenever online,
+    // the cached copy only as an offline fallback.
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          const copy = response.clone();
+          caches.open(CACHE).then((cache) => cache.put('./index.html', copy));
+          return response;
+        })
+        .catch(() => caches.match('./index.html')),
+    );
+    return;
+  }
   event.respondWith(
     caches.match(event.request, { ignoreSearch: true }).then(
       (hit) => hit ?? fetch(event.request),

@@ -10,9 +10,16 @@
 // handler deletes the old one. Navigations are network-first so the
 // HTML itself is never more than one load behind; version.json is
 // never intercepted (the app's update probe must see the network).
+//
+// The worker also receives the Web Share Target POST (static hosting
+// cannot take a POST): the shared image is stashed in the share
+// cache — a mailbox, not a versioned asset cache — and the app
+// consumes it once. Neither the activate cleanup nor the app's
+// update probe ever deletes the share cache.
 const VERSION = '__APP_VERSION__';
 const CACHE_PREFIX = 'voice2qr-';
 const CACHE = CACHE_PREFIX + VERSION;
+const SHARE_CACHE = 'voice2qr-share';
 const ASSETS = [
   './',
   './index.html',
@@ -43,7 +50,7 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((keys) =>
       Promise.all(
         keys
-          .filter((k) => k.startsWith(CACHE_PREFIX) && k !== CACHE)
+          .filter((k) => k.startsWith(CACHE_PREFIX) && k !== CACHE && k !== SHARE_CACHE)
           .map((k) => caches.delete(k)),
       ),
     ).then(() => self.clients.claim()),
@@ -52,6 +59,10 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
+  if (event.request.method === 'POST' && url.pathname.endsWith('/share-target')) {
+    event.respondWith(handleShare(event.request));
+    return;
+  }
   if (event.request.method !== 'GET' || url.origin !== self.location.origin) return;
   if (url.pathname.endsWith('/version.json')) return; // update probe: network only
   if (event.request.mode === 'navigate') {
@@ -74,3 +85,30 @@ self.addEventListener('fetch', (event) => {
     ),
   );
 });
+
+// Share-target intake: keep the shared image in the share cache
+// under a per-share key (rapid successive shares cannot overwrite
+// each other), stamp it with its save time for the app's TTL sweep,
+// and redirect to the app, which consumes it once. The image never
+// leaves the device — this cache is the whole "server" side.
+async function handleShare(request) {
+  const scope = self.registration.scope;
+  try {
+    const form = await request.formData();
+    const file = form.get('image');
+    if (file && typeof file === 'object' && file.size > 0) {
+      const id = crypto.randomUUID();
+      const cache = await caches.open(SHARE_CACHE);
+      await cache.put(new URL(`shared-image/${id}`, scope).href, new Response(file, {
+        headers: {
+          'Content-Type': file.type || 'application/octet-stream',
+          'x-v2q-saved-at': String(Date.now()),
+        },
+      }));
+      return Response.redirect(new URL(`?share=${id}`, scope).href, 303);
+    }
+  } catch {
+    // Malformed share: fall through to the plain redirect.
+  }
+  return Response.redirect(scope, 303);
+}

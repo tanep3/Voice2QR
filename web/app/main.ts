@@ -425,12 +425,15 @@ async function main(): Promise<void> {
     }
   }
 
-  $<HTMLInputElement>('file-image').addEventListener('change', async (ev) => {
-    const file = (ev.target as HTMLInputElement).files?.[0];
-    if (!file) return;
+  // ----- image intake: every route normalizes to a Blob -----
+  // File picker, drag & drop, clipboard paste, and the share target
+  // all end here, so every route gets the same decode + retry path.
+  async function acceptImageBlob(blob: Blob): Promise<void> {
     readError.textContent = '';
     try {
-      const bitmap = await createImageBitmap(file);
+      const bitmap = await createImageBitmap(blob, {
+        imageOrientation: 'from-image',
+      });
       const canvas = document.createElement('canvas');
       canvas.width = bitmap.width;
       canvas.height = bitmap.height;
@@ -452,7 +455,110 @@ async function main(): Promise<void> {
       readResult.hidden = true;
       readError.textContent = t('readError');
     }
+  }
+
+  const fileImage = $<HTMLInputElement>('file-image');
+  const dropZone = $<HTMLElement>('drop-zone');
+  dropZone.addEventListener('click', () => fileImage.click());
+  dropZone.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' || ev.key === ' ') {
+      ev.preventDefault();
+      fileImage.click();
+    }
   });
+  fileImage.addEventListener('change', () => {
+    const file = fileImage.files?.[0];
+    fileImage.value = '';
+    if (file) void acceptImageBlob(file);
+  });
+  dropZone.addEventListener('dragover', (ev) => {
+    ev.preventDefault();
+    dropZone.classList.add('dragover');
+  });
+  dropZone.addEventListener('dragleave', () => {
+    dropZone.classList.remove('dragover');
+  });
+  dropZone.addEventListener('drop', (ev) => {
+    ev.preventDefault();
+    dropZone.classList.remove('dragover');
+    const file = ev.dataTransfer?.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      readError.textContent = t('readError');
+      return;
+    }
+    void acceptImageBlob(file);
+  });
+
+  // Clipboard: the Paste button (navigator.clipboard.read — on phones
+  // this is the intake the share target cannot provide, e.g. iOS) and
+  // the paste event while the read view is showing (PC Ctrl+V).
+  $<HTMLButtonElement>('btn-paste').addEventListener('click', async () => {
+    try {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const type = item.types.find((ty) => ty.startsWith('image/'));
+        if (type) {
+          await acceptImageBlob(await item.getType(type));
+          return;
+        }
+      }
+      readError.textContent = t('pasteEmpty');
+    } catch {
+      readError.textContent = t('pasteEmpty');
+    }
+  });
+  document.addEventListener('paste', (ev) => {
+    if (!viewRead.classList.contains('active')) return;
+    const file = ev.clipboardData?.files?.[0];
+    if (file && file.type.startsWith('image/')) {
+      ev.preventDefault();
+      void acceptImageBlob(file);
+    }
+  });
+
+  // ----- share-target intake -----
+  // The service worker stashes an image shared from another app in
+  // the share cache and redirects here with ?share=<uuid>. Consume
+  // it once, then sweep leftovers older than the TTL — a fresh entry
+  // may belong to another tab that has not consumed it yet, so the
+  // sweep must not simply delete everything else.
+  const SHARE_CACHE = 'voice2qr-share';
+  const SHARE_TTL_MS = 10 * 60 * 1000;
+  async function consumeSharedImage(): Promise<void> {
+    if (!('caches' in window)) return;
+    try {
+      const cache = await caches.open(SHARE_CACHE);
+      const params = new URLSearchParams(window.location.search);
+      const id = params.get('share');
+      if (id) {
+        const key = new URL(`shared-image/${id}`, document.baseURI).href;
+        const hit = await cache.match(key);
+        if (hit) {
+          await cache.delete(key);
+          showView(false);
+          await acceptImageBlob(await hit.blob());
+        }
+        params.delete('share');
+        const qs = params.toString();
+        window.history.replaceState(
+          null,
+          '',
+          window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash,
+        );
+      }
+      for (const key of await cache.keys()) {
+        const res = await cache.match(key);
+        const savedAt = Number(res?.headers.get('x-v2q-saved-at') ?? 0);
+        if (!savedAt || Date.now() - savedAt > SHARE_TTL_MS) {
+          await cache.delete(key);
+        }
+      }
+    } catch {
+      // No Cache Storage (or nothing shared): nothing to consume.
+    }
+  }
+  void consumeSharedImage();
 
   async function stopCamera(): Promise<void> {
     if (cameraTimer !== null) {
@@ -584,7 +690,9 @@ async function checkForUpdate(): Promise<void> {
       // app's own caches (same prefix rule as the worker's activate).
       const keys = await caches.keys();
       await Promise.all(
-        keys.filter((k) => k.startsWith('voice2qr-')).map((k) => caches.delete(k)),
+        keys
+          .filter((k) => k.startsWith('voice2qr-') && k !== 'voice2qr-share')
+          .map((k) => caches.delete(k)),
       );
     }
     await registration?.unregister().catch(() => undefined);

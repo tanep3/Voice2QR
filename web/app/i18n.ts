@@ -22,7 +22,7 @@ const dict = {
     stopPlay: '停止',
     resultInfo: '{sec} 秒の声 / {bytes} バイト',
     dropImage: 'QR 画像をドロップ、またはクリックで選択',
-    paste: '貼り付け',
+    paste: 'QRを貼り付け',
 
     cameraStart: 'カメラで読む',
     cameraStop: 'カメラ停止',
@@ -61,7 +61,7 @@ const dict = {
     stopPlay: 'Stop',
     resultInfo: '{sec} s of voice / {bytes} bytes',
     dropImage: 'Drop a QR image, or click to choose',
-    paste: 'Paste',
+    paste: 'Paste a QR code',
 
     cameraStart: 'Read with camera',
     cameraStop: 'Stop camera',

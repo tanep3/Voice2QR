@@ -490,30 +490,65 @@ async function main(): Promise<void> {
     void acceptImageBlob(file);
   });
 
-  // Clipboard: the Paste button (navigator.clipboard.read — on phones
-  // this is the intake the share target cannot provide, e.g. iOS) and
-  // the paste event while the read view is showing (PC Ctrl+V).
+  // Clipboard, two routes with different reach:
+  // - The Paste button uses the Async Clipboard API, whose image
+  //   surface is effectively PNG-only: a copy another app placed as
+  //   a JPEG may never be exposed to it (seen on iPad with an image
+  //   copied from X). The outcome messages are kept distinct so a
+  //   failure report says which wall it hit.
+  // - The paste event goes through the browser's legacy paste path,
+  //   which tolerates more image formats. On touch devices it needs
+  //   an editable target for the callout menu — the paste box.
   $<HTMLButtonElement>('btn-paste').addEventListener('click', async () => {
+    if (!navigator.clipboard?.read) {
+      readError.textContent = t('pasteUnsupported');
+      return;
+    }
     try {
       const items = await navigator.clipboard.read();
+      const seen: string[] = [];
       for (const item of items) {
+        seen.push(...item.types);
         const type = item.types.find((ty) => ty.startsWith('image/'));
         if (type) {
           await acceptImageBlob(await item.getType(type));
           return;
         }
       }
-      readError.textContent = t('pasteEmpty');
-    } catch {
-      readError.textContent = t('pasteEmpty');
+      readError.textContent = seen.length
+        ? t('pasteNoImage', { types: [...new Set(seen)].join(', ') })
+        : t('pasteEmpty');
+    } catch (e) {
+      readError.textContent = t('pasteFailed', {
+        detail: e instanceof Error ? e.name : String(e),
+      });
     }
   });
+  const pasteBox = $<HTMLElement>('paste-box');
   document.addEventListener('paste', (ev) => {
     if (!viewRead.classList.contains('active')) return;
-    const file = ev.clipboardData?.files?.[0];
-    if (file && file.type.startsWith('image/')) {
+    const data = ev.clipboardData;
+    if (!data) return;
+    let file: File | null = data.files?.[0] ?? null;
+    if (file && !file.type.startsWith('image/')) file = null;
+    if (!file) {
+      for (const item of data.items) {
+        if (item.kind === 'file' && item.type.startsWith('image/')) {
+          file = item.getAsFile();
+          if (file) break;
+        }
+      }
+    }
+    if (file) {
       ev.preventDefault();
       void acceptImageBlob(file);
+    }
+    // The paste box is a drop target for the event, not an editor:
+    // clear anything the browser inserted into it.
+    if (ev.target instanceof Node && pasteBox.contains(ev.target)) {
+      window.setTimeout(() => {
+        pasteBox.innerHTML = '';
+      }, 0);
     }
   });
 

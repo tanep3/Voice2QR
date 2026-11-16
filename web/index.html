@@ -95,6 +95,11 @@
     padding: 26px 12px; text-align: center; color: #a06cb8; cursor: pointer; margin-bottom: 12px;
   }
   .drop-zone.dragover { background: #ffeef7; border-color: #ff7eb9; }
+  .paste-box {
+    border: 2px dashed #ffc7e3; border-radius: 14px; min-height: 44px;
+    background: rgba(255,255,255,.5); padding: 6px; margin-bottom: 12px;
+  }
+  .paste-box img { max-width: 100%; }
   input[type="file"] { font-family: inherit; font-size: 14px; color: #8a6db3; max-width: 100%; }
   input[type="file"]::file-selector-button {
     font-family: inherit; font-weight: 700; font-size: 14px; color: #d63384;
@@ -161,7 +166,9 @@
   </div>
   <div class="row">
     <button id="btn-paste" class="action" type="button" data-i18n="paste">貼り付け</button>
+    <span class="status" data-i18n="pasteBoxLabel">または、ここをタップしてペースト</span>
   </div>
+  <div id="paste-box" class="paste-box" contenteditable="true"></div>
   <div class="row">
     <button id="btn-camera" class="action" type="button" data-i18n="cameraStart">カメラで読む</button>
     <span id="read-status" class="status"></span>

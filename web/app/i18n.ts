@@ -23,11 +23,7 @@ const dict = {
     resultInfo: '{sec} 秒の声 / {bytes} バイト',
     dropImage: 'QR 画像をドロップ、またはクリックで選択',
     paste: '貼り付け',
-    pasteEmpty: 'クリップボードに画像がありませんでした',
-    pasteNoImage: 'クリップボードに画像がありませんでした（あった型： {types}）',
-    pasteFailed: 'クリップボードを読めませんでした（{detail}）',
-    pasteUnsupported: 'このブラウザでは貼り付けボタンが使えません',
-    pasteBoxLabel: 'または、ここをタップしてペースト',
+
     cameraStart: 'カメラで読む',
     cameraStop: 'カメラ停止',
     scanning: 'QR を探しています…',
@@ -66,11 +62,7 @@ const dict = {
     resultInfo: '{sec} s of voice / {bytes} bytes',
     dropImage: 'Drop a QR image, or click to choose',
     paste: 'Paste',
-    pasteEmpty: 'No image in the clipboard',
-    pasteNoImage: 'No image in the clipboard (found: {types})',
-    pasteFailed: 'Could not read the clipboard ({detail})',
-    pasteUnsupported: 'The paste button is not available in this browser',
-    pasteBoxLabel: 'or tap here and paste',
+
     cameraStart: 'Read with camera',
     cameraStop: 'Stop camera',
     scanning: 'Looking for a QR code…',
@@ -118,5 +110,9 @@ export function applyI18n(root: ParentNode = document): void {
   root.querySelectorAll<HTMLElement>('[data-i18n]').forEach((el) => {
     const key = el.dataset.i18n as I18nKey;
     el.textContent = t(key);
+  });
+  root.querySelectorAll<HTMLElement>('[data-i18n-placeholder]').forEach((el) => {
+    const key = el.dataset.i18nPlaceholder as I18nKey;
+    el.dataset.placeholder = t(key);
   });
 }

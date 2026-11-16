@@ -490,40 +490,16 @@ async function main(): Promise<void> {
     void acceptImageBlob(file);
   });
 
-  // Clipboard, two routes with different reach:
-  // - The Paste button uses the Async Clipboard API, whose image
-  //   surface is effectively PNG-only: a copy another app placed as
-  //   a JPEG may never be exposed to it (seen on iPad with an image
-  //   copied from X). The outcome messages are kept distinct so a
-  //   failure report says which wall it hit.
-  // - The paste event goes through the browser's legacy paste path,
-  //   which tolerates more image formats. On touch devices it needs
-  //   an editable target for the callout menu — the paste box.
-  $<HTMLButtonElement>('btn-paste').addEventListener('click', async () => {
-    if (!navigator.clipboard?.read) {
-      readError.textContent = t('pasteUnsupported');
-      return;
-    }
-    try {
-      const items = await navigator.clipboard.read();
-      const seen: string[] = [];
-      for (const item of items) {
-        seen.push(...item.types);
-        const type = item.types.find((ty) => ty.startsWith('image/'));
-        if (type) {
-          await acceptImageBlob(await item.getType(type));
-          return;
-        }
-      }
-      readError.textContent = seen.length
-        ? t('pasteNoImage', { types: [...new Set(seen)].join(', ') })
-        : t('pasteEmpty');
-    } catch (e) {
-      readError.textContent = t('pasteFailed', {
-        detail: e instanceof Error ? e.name : String(e),
-      });
-    }
-  });
+  // Clipboard: ONE route, the paste event. The Async Clipboard API
+  // (clipboard.read) was dropped: its image surface is effectively
+  // PNG-only, so a copy another app placed as a JPEG never reaches
+  // it (seen on iPad with an image copied from X). The paste event
+  // goes through the browser's legacy paste path, which tolerates
+  // JPEG and other formats. On touch devices the callout menu needs
+  // an editable target — the paste box (placeholder: Paste). A page
+  // cannot paste programmatically, so the flow is tap the box,
+  // then Paste in the callout; on PC, Ctrl+V anywhere in this view
+  // works too.
   const pasteBox = $<HTMLElement>('paste-box');
   document.addEventListener('paste', (ev) => {
     if (!viewRead.classList.contains('active')) return;

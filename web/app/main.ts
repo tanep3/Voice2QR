@@ -34,6 +34,60 @@ function $<T extends HTMLElement>(id: string): T {
   return el as T;
 }
 
+// ----- save file names -----
+// A web app cannot see what already exists at the save destination
+// (the Downloads folder, or the app a share is handed to), so a fixed
+// file name silently overwrites the previous QR saved there — found
+// in the field 2026-11-19: every save was "voice2qr.png". The default
+// name therefore carries a to-the-second timestamp, making collisions
+// impossible by construction; names handed out in this session are
+// also remembered and get a -2, -3, ... suffix if the same second
+// repeats. A name the user typed is used verbatim: picking a name is
+// their intent, overwrite included.
+const handedOutNames = new Set<string>();
+
+function defaultSaveName(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, '0');
+  return (
+    `voice2qr-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}` +
+    `-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}.png`
+  );
+}
+
+function sanitizeSaveName(raw: string): string {
+  const name = raw
+    .trim()
+    .replace(/[\\/:*?"<>|]/g, '_')
+    .replace(/\s+/g, ' ')
+    .replace(/^\.+/, '')
+    .slice(0, 100);
+  if (!name) return '';
+  return /\.png$/i.test(name) ? name : `${name}.png`;
+}
+
+/**
+ * The name for one save/share action. While the field is untouched,
+ * a fresh unique default is generated (and shown in the field). Once
+ * the user edits the field, their text wins as-is.
+ */
+function resolveSaveName(input: HTMLInputElement, edited: boolean): string {
+  if (edited) {
+    const typed = sanitizeSaveName(input.value);
+    if (typed) return typed;
+  }
+  let name = defaultSaveName();
+  if (handedOutNames.has(name)) {
+    const stem = name.slice(0, -'.png'.length);
+    let n = 2;
+    while (handedOutNames.has(`${stem}-${n}.png`)) n++;
+    name = `${stem}-${n}.png`;
+  }
+  handedOutNames.add(name);
+  input.value = name;
+  return name;
+}
+
 async function loadLibrary(): Promise<{
   lib: typeof Lib;
   browser: typeof LibBrowser;
@@ -149,6 +203,11 @@ async function main(): Promise<void> {
   const recStatus = $<HTMLElement>('rec-status');
   const recProgress = $<HTMLProgressElement>('rec-progress');
   const createResult = $<HTMLElement>('create-result');
+  const nameCreate = $<HTMLInputElement>('name-create');
+  let createNameEdited = false;
+  nameCreate.addEventListener('input', () => {
+    createNameEdited = true;
+  });
   const createError = $<HTMLElement>('create-error');
   const qrCanvas = $<HTMLCanvasElement>('qr');
   const resultInfo = $<HTMLElement>('result-info');
@@ -194,6 +253,8 @@ async function main(): Promise<void> {
     currentPayload = payload;
     createResult.hidden = false;
     createError.textContent = '';
+    nameCreate.value = defaultSaveName();
+    createNameEdited = false;
     void (async () => {
       try {
         const matrix = await v2q.payloadToQr(payload, { ecLevel: settings.ecLevel });
@@ -429,7 +490,7 @@ async function main(): Promise<void> {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'voice2qr.png';
+    a.download = resolveSaveName(nameCreate, createNameEdited);
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   });
@@ -455,7 +516,11 @@ async function main(): Promise<void> {
         ecLevel: settings.ecLevel,
         modulePx: 10,
       });
-      const file = new File([blob], 'voice2qr.png', { type: 'image/png' });
+      const file = new File(
+        [blob],
+        resolveSaveName(nameCreate, createNameEdited),
+        { type: 'image/png' },
+      );
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({ files: [file] });
       } else {
@@ -529,6 +594,11 @@ async function main(): Promise<void> {
   const video = $<HTMLVideoElement>('camera');
   const readRescue = $<HTMLElement>('read-rescue');
   const rescueQr = $<HTMLCanvasElement>('rescue-qr');
+  const nameRescue = $<HTMLInputElement>('name-rescue');
+  let rescueNameEdited = false;
+  nameRescue.addEventListener('input', () => {
+    rescueNameEdited = true;
+  });
   const rescueError = $<HTMLElement>('rescue-error');
   let readPayload: Uint8Array | null = null;
   let readEcLevel: Lib.EcLevel | null = null;
@@ -565,6 +635,8 @@ async function main(): Promise<void> {
         readPayload = payload;
         readEcLevel = ecLevel;
         readResult.hidden = false;
+        nameRescue.value = defaultSaveName();
+        rescueNameEdited = false;
         btnPlay.classList.add('attention');
         readInfo.textContent = t('voiceFound', {
           sec: (info.voice.durationMs / 1000).toFixed(1),
@@ -855,7 +927,7 @@ async function main(): Promise<void> {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'voice2qr.png';
+    a.download = resolveSaveName(nameRescue, rescueNameEdited);
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   });
@@ -868,7 +940,11 @@ async function main(): Promise<void> {
         ecLevel: readEcLevel ?? 'M',
         modulePx: 10,
       });
-      const file = new File([blob], 'voice2qr.png', { type: 'image/png' });
+      const file = new File(
+        [blob],
+        resolveSaveName(nameRescue, rescueNameEdited),
+        { type: 'image/png' },
+      );
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({ files: [file] });
       } else {

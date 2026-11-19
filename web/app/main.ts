@@ -42,8 +42,7 @@ function $<T extends HTMLElement>(id: string): T {
 // name therefore carries a to-the-second timestamp, making collisions
 // impossible by construction; names handed out in this session are
 // also remembered and get a -2, -3, ... suffix if the same second
-// repeats. A name the user typed is used verbatim: picking a name is
-// their intent, overwrite included.
+// repeats.
 const handedOutNames = new Set<string>();
 
 function defaultSaveName(): string {
@@ -55,27 +54,15 @@ function defaultSaveName(): string {
   );
 }
 
-function sanitizeSaveName(raw: string): string {
-  const name = raw
-    .trim()
-    .replace(/[\\/:*?"<>|]/g, '_')
-    .replace(/\s+/g, ' ')
-    .replace(/^\.+/, '')
-    .slice(0, 100);
-  if (!name) return '';
-  return /\.png$/i.test(name) ? name : `${name}.png`;
-}
-
 /**
- * The name for one save/share action. While the field is untouched,
- * a fresh unique default is generated (and shown in the field). Once
- * the user edits the field, their text wins as-is.
+ * The name for one save/share action: a fresh timestamped default,
+ * deduplicated within the session. There is deliberately no name
+ * field — the timestamp alone guarantees uniqueness, so naming UI
+ * would be surface a casual user should not have to think about
+ * (decided 2026-11-19; if custom naming is ever needed, it should
+ * come back as a save-time prompt, not a standing field).
  */
-function resolveSaveName(input: HTMLInputElement, edited: boolean): string {
-  if (edited) {
-    const typed = sanitizeSaveName(input.value);
-    if (typed) return typed;
-  }
+function nextSaveName(): string {
   let name = defaultSaveName();
   if (handedOutNames.has(name)) {
     const stem = name.slice(0, -'.png'.length);
@@ -84,7 +71,6 @@ function resolveSaveName(input: HTMLInputElement, edited: boolean): string {
     name = `${stem}-${n}.png`;
   }
   handedOutNames.add(name);
-  input.value = name;
   return name;
 }
 
@@ -203,11 +189,6 @@ async function main(): Promise<void> {
   const recStatus = $<HTMLElement>('rec-status');
   const recProgress = $<HTMLProgressElement>('rec-progress');
   const createResult = $<HTMLElement>('create-result');
-  const nameCreate = $<HTMLInputElement>('name-create');
-  let createNameEdited = false;
-  nameCreate.addEventListener('input', () => {
-    createNameEdited = true;
-  });
   const createError = $<HTMLElement>('create-error');
   const qrCanvas = $<HTMLCanvasElement>('qr');
   const resultInfo = $<HTMLElement>('result-info');
@@ -253,8 +234,6 @@ async function main(): Promise<void> {
     currentPayload = payload;
     createResult.hidden = false;
     createError.textContent = '';
-    nameCreate.value = defaultSaveName();
-    createNameEdited = false;
     void (async () => {
       try {
         const matrix = await v2q.payloadToQr(payload, { ecLevel: settings.ecLevel });
@@ -490,7 +469,7 @@ async function main(): Promise<void> {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = resolveSaveName(nameCreate, createNameEdited);
+    a.download = nextSaveName();
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   });
@@ -518,7 +497,7 @@ async function main(): Promise<void> {
       });
       const file = new File(
         [blob],
-        resolveSaveName(nameCreate, createNameEdited),
+        nextSaveName(),
         { type: 'image/png' },
       );
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -594,11 +573,6 @@ async function main(): Promise<void> {
   const video = $<HTMLVideoElement>('camera');
   const readRescue = $<HTMLElement>('read-rescue');
   const rescueQr = $<HTMLCanvasElement>('rescue-qr');
-  const nameRescue = $<HTMLInputElement>('name-rescue');
-  let rescueNameEdited = false;
-  nameRescue.addEventListener('input', () => {
-    rescueNameEdited = true;
-  });
   const rescueError = $<HTMLElement>('rescue-error');
   let readPayload: Uint8Array | null = null;
   let readEcLevel: Lib.EcLevel | null = null;
@@ -635,8 +609,6 @@ async function main(): Promise<void> {
         readPayload = payload;
         readEcLevel = ecLevel;
         readResult.hidden = false;
-        nameRescue.value = defaultSaveName();
-        rescueNameEdited = false;
         btnPlay.classList.add('attention');
         readInfo.textContent = t('voiceFound', {
           sec: (info.voice.durationMs / 1000).toFixed(1),
@@ -927,7 +899,7 @@ async function main(): Promise<void> {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = resolveSaveName(nameRescue, rescueNameEdited);
+    a.download = nextSaveName();
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   });
@@ -942,7 +914,7 @@ async function main(): Promise<void> {
       });
       const file = new File(
         [blob],
-        resolveSaveName(nameRescue, rescueNameEdited),
+        nextSaveName(),
         { type: 'image/png' },
       );
       if (navigator.canShare && navigator.canShare({ files: [file] })) {

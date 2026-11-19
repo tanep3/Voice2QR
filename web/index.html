@@ -116,8 +116,6 @@
   }
   .paste-box img { max-width: 100%; }
   input[type="file"] { font-family: inherit; font-size: 14px; color: #8a6db3; max-width: 100%; }
-  .name-label { display: flex; align-items: center; gap: 8px; flex: 1; font-weight: 600; color: #8a6db3; }
-  .name-input { font-family: inherit; font-size: 15px; color: #6b4fa1; background: #fff; border: 2px solid #e3d5f5; border-radius: 10px; padding: 6px 10px; flex: 1; min-width: 160px; }
   input[type="file"]::file-selector-button {
     font-family: inherit; font-weight: 700; font-size: 14px; color: #d63384;
     background: #fff; border: 2px solid #ffc7e3; border-radius: 999px; padding: 7px 14px;
@@ -171,11 +169,6 @@
     <canvas id="qr"></canvas>
     <div class="row"><span id="result-info" class="status"></span></div>
     <div class="row">
-      <label class="name-label"><span data-i18n="fileName">ファイル名</span>
-        <input id="name-create" class="name-input" type="text" autocomplete="off" spellcheck="false" />
-      </label>
-    </div>
-    <div class="row">
       <button id="btn-share" class="action" type="button" data-i18n="share">共有</button>
       <button id="btn-save" class="action" type="button" data-i18n="savePng">PNG を保存</button>
       <button id="btn-print" class="action" type="button" data-i18n="print">印刷</button>
@@ -209,11 +202,6 @@
   <div class="rescue-head" data-i18n="rescueTitle">読み取った QR</div>
   <p class="rescue-note" data-i18n="rescueNote">きれいに再生成しました。元の QR が読めなくなる前に、保存しておきましょう。</p>
   <canvas id="rescue-qr"></canvas>
-  <div class="row">
-    <label class="name-label"><span data-i18n="fileName">ファイル名</span>
-      <input id="name-rescue" class="name-input" type="text" autocomplete="off" spellcheck="false" />
-    </label>
-  </div>
   <div class="row">
     <button id="btn-rescue-share" class="action" type="button" data-i18n="share">共有</button>
     <button id="btn-rescue-save" class="action" type="button" data-i18n="savePng">PNG を保存</button>

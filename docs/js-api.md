@@ -66,6 +66,7 @@ const pcmOut = await v2q.decode(back);      // → Int16Array（再生用 PCM）
 | `v2q.maxDurationMs(options?)` | 録れる上限時間（ms）を返す | `Promise<number>` |
 | `v2q.payloadToQr(payload, options?)` | ペイロードを QR 行列にする | `Promise<QrMatrix>` |
 | `v2q.qrToPayload(image)` | 画像のピクセルからペイロードを読む | `Promise<Uint8Array>` |
+| `v2q.readQr(image)` | ペイロードに加え、読んだ QR の誤り訂正レベルも返す | `Promise<QrReadResult>` |
 
 `v2q` は `createVoice2Qr()` が返したインスタンスを指す。
 
@@ -197,6 +198,29 @@ QV かどうかの判定はここではしない（`inspect` / `decode` の仕�
 戻り値： `Promise<Uint8Array>`。
 エラー： QR が見つからなければ `QR_NOT_FOUND`。カメラ読取では、
 利用側がフレームを繰り返し渡し、`QR_NOT_FOUND` の間は走査を続ける。
+
+### v2q.readQr(image)（ライブラリ 0.2.0 で追加）
+
+`qrToPayload` と同じ読み取りに、読み取ったシンボル自体の誤り訂正
+レベルを加えて返す。引数・エラーは `qrToPayload` と同じ。
+
+戻り値： `Promise<QrReadResult>`
+
+```ts
+{
+  payload: Uint8Array,        // qrToPayload が返すものと同じ生バイト列
+  ecLevel: 'L' | 'M' | 'Q' | 'H' | null
+                              // シンボルのフォーマット情報から得た元のレベル。
+                              // リーダが報告しなかった場合は null
+}
+```
+
+用途： 読んだ QR をきれいに再生成する（例： 薄汚れた印刷の救出）。
+`ecLevel` を `payloadToQr` にそのまま渡せば、データとして等価な QR が
+再現できる（本ライブラリで生成した QR ならモジュール単位でも同一に
+なる）。同レベル＝同容量なので、元に入っていたペイロードが容量超過に
+なることはない。レベルを上げての再生成は「複製」ではなく「作り替え」に
+なるため、既定にはしない。
 
 ## 4. ブラウザ用ヘルパ（別エントリ）
 

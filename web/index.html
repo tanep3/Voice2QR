@@ -60,6 +60,15 @@
     font-size: 18px; padding: 14px 26px; box-shadow: 0 8px 18px rgba(255, 126, 185, .45);
   }
   button.action.primary.recording { animation: recpulse 1.2s ease-in-out infinite; }
+  button.action.primary.attention { animation: recpulse 1.6s ease-in-out infinite; }
+  #btn-play { flex: 1; }
+  #read-rescue {
+    background: rgba(255,255,255,.78); border: 2px solid #fff; border-radius: 26px;
+    padding: 18px; box-shadow: 0 12px 28px rgba(176, 141, 214, .22); margin-top: 14px;
+  }
+  #read-rescue[hidden] { display: none; }
+  #read-rescue .rescue-head { font-weight: 800; color: #a06cd5; letter-spacing: .06em; }
+  #read-rescue .rescue-note { color: #8a6db3; font-weight: 600; font-size: 14px; margin: 6px 0 12px; }
   @keyframes recpulse {
     0%, 100% { box-shadow: 0 8px 18px rgba(255, 126, 185, .45), 0 0 0 0 rgba(255, 126, 185, .45); }
     50% { box-shadow: 0 8px 18px rgba(255, 126, 185, .45), 0 0 0 12px rgba(255, 126, 185, 0); }
@@ -72,11 +81,11 @@
   progress::-moz-progress-bar { background: linear-gradient(90deg, #ff8ac2, #b18cff); border-radius: 999px; }
   .status { min-height: 1.4em; color: #8a6db3; font-weight: 600; }
   .error { color: #e5487f; font-weight: 700; }
-  canvas#qr {
+  canvas#qr, canvas#rescue-qr {
     image-rendering: pixelated; background: #fff; border: 3px dashed #ff9ecf; border-radius: 20px;
     padding: 10px; max-width: 100%; height: auto; box-shadow: 0 8px 18px rgba(214, 141, 196, .25);
-    cursor: pointer;
   }
+  canvas#qr { cursor: pointer; }
   #qr-modal {
     position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column;
     align-items: center; justify-content: center; gap: 16px; padding: 20px;
@@ -179,10 +188,21 @@
   <div id="read-result" hidden>
     <div class="row"><span id="read-info" class="status"></span></div>
     <div class="row">
-      <button id="btn-play" class="action" type="button" data-i18n="play">再生</button>
+      <button id="btn-play" class="action primary" type="button" data-i18n="playHero">▶ 再生</button>
     </div>
   </div>
   <div id="read-error" class="status error"></div>
+</section>
+
+<section id="read-rescue" hidden>
+  <div class="rescue-head" data-i18n="rescueTitle">読み取った QR</div>
+  <p class="rescue-note" data-i18n="rescueNote">きれいに再生成しました。元の QR が読めなくなる前に、保存しておきましょう。</p>
+  <canvas id="rescue-qr"></canvas>
+  <div class="row">
+    <button id="btn-rescue-share" class="action" type="button" data-i18n="share">共有</button>
+    <button id="btn-rescue-save" class="action" type="button" data-i18n="savePng">PNG を保存</button>
+  </div>
+  <div id="rescue-error" class="status error"></div>
 </section>
 
 <details class="settings">

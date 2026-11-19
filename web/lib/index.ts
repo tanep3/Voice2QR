@@ -10,15 +10,17 @@ import { Voice2QrError } from './errors.js';
 import {
   payloadToQr as toQr,
   qrToPayload as fromPixels,
+  qrToPayloadDetailed as fromPixelsDetailed,
   QR_CAPACITY,
   type EcLevel,
   type PixelData,
   type QrMatrix,
   type QrReadOptions,
+  type QrReadResult,
 } from './qr.js';
 
 export { Voice2QrError, type ErrorCode } from './errors.js';
-export type { EcLevel, PixelData, QrMatrix, QrReadOptions };
+export type { EcLevel, PixelData, QrMatrix, QrReadOptions, QrReadResult };
 
 export interface CreateOptions {
   /** Core wasm URL. Default: resolved relative to this module. */
@@ -63,9 +65,17 @@ export interface Voice2Qr {
   maxDurationMs(options?: EncodeOptions): Promise<number>;
   payloadToQr(payload: Uint8Array, options?: { ecLevel?: EcLevel }): Promise<QrMatrix>;
   qrToPayload(image: PixelData, options?: QrReadOptions): Promise<Uint8Array>;
+  /**
+   * Like qrToPayload, but also reports the error-correction level of
+   * the symbol that was read (null when the reader did not report a
+   * usable level). Passing that level to payloadToQr re-generates an
+   * equivalent symbol at the same level — e.g. to rescue a fading
+   * printed code.
+   */
+  readQr(image: PixelData, options?: QrReadOptions): Promise<QrReadResult>;
 }
 
-const LIBRARY_VERSION = '0.1.0';
+const LIBRARY_VERSION = '0.2.0';
 const FORMAT_VERSION = 2;
 const DEFAULT_BPS = 1200;
 const DEFAULT_EC: EcLevel = 'M';
@@ -73,6 +83,20 @@ const DEFAULT_EC: EcLevel = 'M';
 function checkPcm(pcm: unknown): asserts pcm is Int16Array {
   if (!(pcm instanceof Int16Array)) {
     throw new Voice2QrError('INVALID_ARGUMENT', 'pcm must be an Int16Array');
+  }
+}
+
+function checkImage(image: unknown): asserts image is PixelData {
+  const img = image as PixelData | null | undefined;
+  if (
+    !img ||
+    !(img.data instanceof Uint8Array || img.data instanceof Uint8ClampedArray) ||
+    !Number.isInteger(img.width) ||
+    !Number.isInteger(img.height) ||
+    img.width <= 0 ||
+    img.height <= 0
+  ) {
+    throw new Voice2QrError('INVALID_ARGUMENT', 'image must be { data, width, height }');
   }
 }
 
@@ -188,17 +212,13 @@ class Voice2QrImpl implements Voice2Qr {
   }
 
   async qrToPayload(image: PixelData, options?: QrReadOptions): Promise<Uint8Array> {
-    if (
-      !image ||
-      !(image.data instanceof Uint8Array || image.data instanceof Uint8ClampedArray) ||
-      !Number.isInteger(image.width) ||
-      !Number.isInteger(image.height) ||
-      image.width <= 0 ||
-      image.height <= 0
-    ) {
-      throw new Voice2QrError('INVALID_ARGUMENT', 'image must be { data, width, height }');
-    }
+    checkImage(image);
     return fromPixels(image, this.zxingWasmHref, options);
+  }
+
+  async readQr(image: PixelData, options?: QrReadOptions): Promise<QrReadResult> {
+    checkImage(image);
+    return fromPixelsDetailed(image, this.zxingWasmHref, options);
   }
 }
 

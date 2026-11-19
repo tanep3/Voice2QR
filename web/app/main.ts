@@ -93,6 +93,7 @@ async function main(): Promise<void> {
     viewCreate.classList.toggle('active', create);
     viewRead.classList.toggle('active', !create);
     if (create) void stopCamera();
+    updateRescueVisibility();
   };
   tabCreate.addEventListener('click', () => showView(true));
   tabRead.addEventListener('click', () => showView(false));
@@ -383,7 +384,8 @@ async function main(): Promise<void> {
   });
   player.onended = () => {
     btnPreview.textContent = t('play');
-    btnPlay.textContent = t('play');
+    btnPlay.textContent = t('playHero');
+    if (readResult && !readResult.hidden) btnPlay.classList.add('attention');
   };
 
   // =====================================================================
@@ -396,31 +398,70 @@ async function main(): Promise<void> {
   const btnPlay = $<HTMLButtonElement>('btn-play');
   const btnCamera = $<HTMLButtonElement>('btn-camera');
   const video = $<HTMLVideoElement>('camera');
+  const readRescue = $<HTMLElement>('read-rescue');
+  const rescueQr = $<HTMLCanvasElement>('rescue-qr');
+  const rescueError = $<HTMLElement>('rescue-error');
   let readPayload: Uint8Array | null = null;
+  let readEcLevel: Lib.EcLevel | null = null;
+  let rescueReady = false;
   let cameraStream: MediaStream | null = null;
   let cameraTimer: number | null = null;
   let cameraScanStart = 0;
   let cameraLastLadder = 0;
 
-  async function acceptPayload(payload: Uint8Array): Promise<void> {
+  // The rescue card lives outside the tab views (below the panel,
+  // above the settings), so its visibility follows both the read
+  // state and the active tab.
+  function updateRescueVisibility(): void {
+    readRescue.hidden = !(rescueReady && tabRead.classList.contains('active'));
+  }
+
+  function clearReadResult(): void {
+    readPayload = null;
+    readEcLevel = null;
+    readResult.hidden = true;
+    btnPlay.classList.remove('attention');
+    rescueReady = false;
+    updateRescueVisibility();
+  }
+
+  async function acceptPayload(
+    payload: Uint8Array,
+    ecLevel: Lib.EcLevel | null,
+  ): Promise<void> {
     readError.textContent = '';
     try {
       const info = await v2q.inspect(payload);
       if (info.voice) {
         readPayload = payload;
+        readEcLevel = ecLevel;
         readResult.hidden = false;
+        btnPlay.classList.add('attention');
         readInfo.textContent = t('voiceFound', {
           sec: (info.voice.durationMs / 1000).toFixed(1),
           bps: info.voice.bps,
         });
+        // Rescue copy: re-encode the raw payload at the ORIGINAL ec
+        // level — same level, same capacity, so the clean copy is
+        // guaranteed to hold the payload and stays equivalent.
+        rescueReady = true;
+        rescueError.textContent = '';
+        updateRescueVisibility();
+        try {
+          const matrix = await v2q.payloadToQr(payload, {
+            ecLevel: ecLevel ?? 'M',
+          });
+          browser.drawQr(rescueQr, matrix, { modulePx: 6 });
+        } catch {
+          rescueReady = false;
+          updateRescueVisibility();
+        }
       } else {
-        readPayload = null;
-        readResult.hidden = true;
+        clearReadResult();
         readError.textContent = t('noVoice');
       }
     } catch {
-      readPayload = null;
-      readResult.hidden = true;
+      clearReadResult();
       readError.textContent = t('readError');
     }
   }
@@ -441,7 +482,7 @@ async function main(): Promise<void> {
       if (!ctx) throw new Error('no 2d context');
       ctx.drawImage(bitmap, 0, 0);
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const payload = await v2q.qrToPayload(
+      const { payload, ecLevel } = await v2q.readQr(
         {
           data: imageData.data,
           width: imageData.width,
@@ -449,10 +490,9 @@ async function main(): Promise<void> {
         },
         { scaleRetry: true },
       );
-      await acceptPayload(payload);
+      await acceptPayload(payload, ecLevel);
     } catch {
-      readPayload = null;
-      readResult.hidden = true;
+      clearReadResult();
       readError.textContent = t('readError');
     }
   }
@@ -632,7 +672,7 @@ async function main(): Promise<void> {
         now - cameraScanStart > 3000 && now - cameraLastLadder > 3000;
       if (useLadder) cameraLastLadder = now;
       void v2q
-        .qrToPayload(
+        .readQr(
           {
             data: imageData.data,
             width: imageData.width,
@@ -640,9 +680,9 @@ async function main(): Promise<void> {
           },
           { scaleRetry: useLadder },
         )
-        .then(async (payload) => {
+        .then(async ({ payload, ecLevel }) => {
           await stopCamera();
-          await acceptPayload(payload);
+          await acceptPayload(payload, ecLevel);
         })
         .catch(() => {
           // QR_NOT_FOUND: keep scanning.
@@ -654,15 +694,53 @@ async function main(): Promise<void> {
     if (!readPayload) return;
     if (player.playing) {
       player.stop();
-      btnPlay.textContent = t('play');
+      btnPlay.textContent = t('playHero');
+      btnPlay.classList.add('attention');
       return;
     }
     try {
       const pcm = await v2q.decode(readPayload);
       btnPlay.textContent = t('stopPlay');
+      btnPlay.classList.remove('attention');
       await player.play(pcm);
     } catch {
       readError.textContent = t('readError');
+    }
+  });
+
+  // ----- rescue copy: save / share the re-generated QR -----
+  $<HTMLButtonElement>('btn-rescue-save').addEventListener('click', async () => {
+    if (!readPayload) return;
+    const blob = await browser.payloadToPng(readPayload, {
+      ecLevel: readEcLevel ?? 'M',
+      modulePx: 10,
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'voice2qr.png';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  });
+
+  $<HTMLButtonElement>('btn-rescue-share').addEventListener('click', async () => {
+    if (!readPayload) return;
+    rescueError.textContent = '';
+    try {
+      const blob = await browser.payloadToPng(readPayload, {
+        ecLevel: readEcLevel ?? 'M',
+        modulePx: 10,
+      });
+      const file = new File([blob], 'voice2qr.png', { type: 'image/png' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file] });
+      } else {
+        rescueError.textContent = t('shareUnsupported');
+      }
+    } catch (e) {
+      // Dismissing the share sheet is not an error.
+      if (e instanceof DOMException && e.name === 'AbortError') return;
+      rescueError.textContent = describeError(e);
     }
   });
 

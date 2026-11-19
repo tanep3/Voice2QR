@@ -94,7 +94,22 @@ export interface QrReadOptions {
   scaleRetry?: boolean;
 }
 
-async function tryRead(image: PixelData): Promise<Uint8Array | null> {
+export interface QrReadResult {
+  payload: Uint8Array;
+  /**
+   * Error-correction level of the symbol that was read, taken from its
+   * format information; null when the reader did not report a usable
+   * level. Feeding it back into payloadToQr reproduces the symbol at
+   * the same level, so a re-generated copy always fits its payload.
+   */
+  ecLevel: EcLevel | null;
+}
+
+function asEcLevel(v: unknown): EcLevel | null {
+  return v === 'L' || v === 'M' || v === 'Q' || v === 'H' ? v : null;
+}
+
+async function tryRead(image: PixelData): Promise<QrReadResult | null> {
   const imageData = {
     data: image.data,
     width: image.width,
@@ -107,17 +122,17 @@ async function tryRead(image: PixelData): Promise<Uint8Array | null> {
   });
   for (const r of results) {
     if (r.format === 'QRCode' && r.bytes.length > 0) {
-      return new Uint8Array(r.bytes);
+      return { payload: new Uint8Array(r.bytes), ecLevel: asEcLevel(r.ecLevel) };
     }
   }
   return null;
 }
 
-export async function qrToPayload(
+export async function qrToPayloadDetailed(
   image: PixelData,
   zxingWasmHref: string,
   options?: QrReadOptions,
-): Promise<Uint8Array> {
+): Promise<QrReadResult> {
   await ensureZxing(zxingWasmHref);
   const direct = await tryRead(image);
   if (direct) return direct;
@@ -154,4 +169,12 @@ export async function qrToPayload(
     }
   }
   throw new Voice2QrError('QR_NOT_FOUND', 'no QR code found in the image');
+}
+
+export async function qrToPayload(
+  image: PixelData,
+  zxingWasmHref: string,
+  options?: QrReadOptions,
+): Promise<Uint8Array> {
+  return (await qrToPayloadDetailed(image, zxingWasmHref, options)).payload;
 }

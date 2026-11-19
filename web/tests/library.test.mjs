@@ -48,7 +48,7 @@ test('shipped bundles contain no bare module specifiers', async () => {
 });
 
 test('version reports library and format', () => {
-  assert.deepEqual(v2q.version, { library: '0.1.0', format: 2 });
+  assert.deepEqual(v2q.version, { library: '0.2.0', format: 2 });
 });
 
 test('encode matches the golden payload byte for byte', async () => {
@@ -126,6 +126,21 @@ test('QR round trip: matrix -> pixels -> payload', async () => {
   const pixels = renderPixels(qr);
   const back = await v2q.qrToPayload(pixels);
   assert.deepEqual(back, anchorPayload);
+});
+
+test('readQr reports the symbol ec level at every level', async () => {
+  for (const ecLevel of ['L', 'M', 'Q', 'H']) {
+    const qr = await v2q.payloadToQr(anchorPayload, { ecLevel });
+    const result = await v2q.readQr(renderPixels(qr));
+    assert.deepEqual(result.payload, anchorPayload);
+    assert.equal(result.ecLevel, qr.ecLevel);
+    // Rescue invariant: re-encoding the read payload at the reported
+    // level reproduces the very same symbol, module for module.
+    const copy = await v2q.payloadToQr(result.payload, {
+      ecLevel: result.ecLevel,
+    });
+    assert.deepEqual(copy.modules, qr.modules);
+  }
 });
 
 test('qrToPayload on a blank image is QR_NOT_FOUND', async () => {

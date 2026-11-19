@@ -9,6 +9,8 @@ export interface Settings {
   bps: number;
   /** QR error-correction level for recording. Default 'M'. */
   ecLevel: 'L' | 'M' | 'Q' | 'H';
+  /** Normalize a quiet recording up to a fixed peak before encoding. Default ON. */
+  autoGain: boolean;
 }
 
 const KEY = 'voice2qr-settings';
@@ -18,6 +20,7 @@ export function loadSettings(): Settings {
     lang: navigator.language?.toLowerCase().startsWith('ja') ? 'ja' : 'en',
     bps: 1200,
     ecLevel: 'M',
+    autoGain: true,
   };
   try {
     const raw = localStorage.getItem(KEY);
@@ -30,6 +33,8 @@ export function loadSettings(): Settings {
         parsed.ecLevel === 'L' || parsed.ecLevel === 'Q' || parsed.ecLevel === 'H'
           ? parsed.ecLevel
           : 'M',
+      // Absent in settings saved before this option existed: ON.
+      autoGain: parsed.autoGain !== false,
     };
   } catch {
     return defaults;

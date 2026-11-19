@@ -131,6 +131,10 @@
     font-size: 14px; font-family: inherit; font-weight: 600; color: #6b5583;
     padding: 6px 12px; margin-left: 8px; border: 2px solid #ffd0e8; border-radius: 999px; background: #fff;
   }
+  details.settings label.create-setting[hidden] { display: none; }
+  details.settings input[type="checkbox"] {
+    accent-color: #d63384; width: 16px; height: 16px; vertical-align: -2px; margin-right: 6px;
+  }
   footer { margin-top: 22px; color: #a58cc4; font-size: 13px; text-align: center; font-weight: 600; }
   #print-area { display: none; }
   @media print {
@@ -213,7 +217,7 @@
       <option value="en">English</option>
     </select>
   </label>
-  <label><span data-i18n="bps">ビットレート（上級者向け）</span>
+  <label class="create-setting"><span data-i18n="bps">ビットレート（上級者向け）</span>
     <select id="sel-bps">
       <option value="3200">3200 bps</option>
       <option value="2400">2400 bps</option>
@@ -224,7 +228,7 @@
       <option value="700">700C bps</option>
     </select>
   </label>
-  <label><span data-i18n="ecLevel">誤り訂正（上級者向け）</span>
+  <label class="create-setting"><span data-i18n="ecLevel">誤り訂正（上級者向け）</span>
     <select id="sel-ec">
       <option value="L">L</option>
       <option value="M" selected>M</option>
@@ -232,6 +236,7 @@
       <option value="H">H</option>
     </select>
   </label>
+  <label class="create-setting"><input id="chk-gain" type="checkbox" checked /><span data-i18n="autoGain">自動ゲイン調整（小さい声を持ち上げる）</span></label>
 </details>
 
 <footer data-i18n="footer">処理はすべてこの端末の中で行います。録音データは保存されません。</footer>

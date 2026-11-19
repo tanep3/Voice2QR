@@ -19,6 +19,7 @@ import { Recorder } from './recorder.js';
 import { importAudioFile } from './file-import.js';
 import { Player } from './player.js';
 import { printQrImage } from './print.js';
+import { normalizePcm } from './gain.js';
 
 const CAPACITY: Record<Settings['ecLevel'], number> = {
   L: 2953,
@@ -81,6 +82,12 @@ async function main(): Promise<void> {
     settings.ecLevel = selEc.value as Settings['ecLevel'];
     saveSettings(settings);
   });
+  const chkGain = $<HTMLInputElement>('chk-gain');
+  chkGain.checked = settings.autoGain;
+  chkGain.addEventListener('change', () => {
+    settings.autoGain = chkGain.checked;
+    saveSettings(settings);
+  });
 
   // ----- tabs -----
   const tabCreate = $<HTMLButtonElement>('tab-create');
@@ -94,6 +101,14 @@ async function main(): Promise<void> {
     viewRead.classList.toggle('active', !create);
     if (create) void stopCamera();
     updateRescueVisibility();
+    // The settings panel is shared, but its items are not: creation
+    // settings (bit rate, error correction, auto gain) belong to the
+    // Create tab only — on the Read tab just the language remains.
+    document
+      .querySelectorAll<HTMLElement>('.create-setting')
+      .forEach((el) => {
+        el.hidden = !create;
+      });
   };
   tabCreate.addEventListener('click', () => showView(true));
   tabRead.addEventListener('click', () => showView(false));
@@ -129,6 +144,12 @@ async function main(): Promise<void> {
   let draining = false;
   let stopRequested: 'manual' | 'capacity' | null = null;
   let finalizeStarted = false;
+  // Auto-gain mode buffers the whole recording instead of streaming
+  // it into an encoder: the gain comes from the whole clip's peak,
+  // which only exists once the recording ends (see toggleRecord).
+  let pcmBuffer: Int16Array[] | null = null;
+  let bufferedSamples = 0;
+  let maxSamples = 0;
 
   function refreshRecordButton(): void {
     btnRecord.textContent = recorder.recording ? t('stop') : t('record');
@@ -182,11 +203,66 @@ async function main(): Promise<void> {
     }
   }
 
+  async function finalizeBuffered(): Promise<void> {
+    if (finalizeStarted || !pcmBuffer) return;
+    finalizeStarted = true;
+    const chunks = pcmBuffer;
+    pcmBuffer = null;
+    const capacityFull = stopRequested === 'capacity';
+    try {
+      await recorder.stop();
+    } catch {
+      // A failing recorder teardown must not eat the recording.
+    }
+    refreshRecordButton();
+    try {
+      const total = chunks.reduce((n, c) => n + c.length, 0);
+      const joined = new Int16Array(total);
+      let off = 0;
+      for (const c of chunks) {
+        joined.set(c, off);
+        off += c.length;
+      }
+      let pcm = normalizePcm(
+        joined.subarray(0, Math.min(joined.length, maxSamples)),
+      );
+      for (;;) {
+        try {
+          const payload = await v2q.encode(pcm, {
+            bps: settings.bps,
+            ecLevel: settings.ecLevel,
+          });
+          recStatus.textContent = capacityFull ? t('capacityFull') : '';
+          showPayload(payload);
+          return;
+        } catch (e) {
+          // maxDurationMs should make this unreachable; if the core
+          // still says too large, shed 40 ms and retry.
+          if (
+            e instanceof lib.Voice2QrError &&
+            e.code === 'TOO_LARGE' &&
+            pcm.length > 320
+          ) {
+            pcm = pcm.subarray(0, pcm.length - 320);
+            continue;
+          }
+          throw e;
+        }
+      }
+    } catch (e) {
+      createError.textContent = describeError(e);
+    }
+  }
+
   function requestStop(kind: 'manual' | 'capacity'): void {
     if (!stopRequested) stopRequested = kind;
     void recorder.stop();
     refreshRecordButton();
-    void drainQueue();
+    if (pcmBuffer) {
+      void finalizeBuffered();
+    } else {
+      void drainQueue();
+    }
   }
 
   async function drainQueue(): Promise<void> {
@@ -237,24 +313,48 @@ async function main(): Promise<void> {
     stopRequested = null;
     finalizeStarted = false;
     pcmQueue = [];
+    pcmBuffer = null;
+    bufferedSamples = 0;
     try {
       capacity = CAPACITY[settings.ecLevel];
       maxDurationMs = await v2q.maxDurationMs({
         bps: settings.bps,
         ecLevel: settings.ecLevel,
       });
-      encoder = v2q.createEncoder({ bps: settings.bps, ecLevel: settings.ecLevel });
-      const enc = encoder;
-      await recorder.start((chunk) => {
-        if (encoder !== enc || stopRequested) return;
-        pcmQueue.push(chunk);
-        void drainQueue();
-      });
+      maxSamples = Math.floor((maxDurationMs / 1000) * 8000);
+      if (settings.autoGain) {
+        // Buffer the whole recording; gain + one-shot encode happen
+        // at finalize. Progress is duration-based here — payload size
+        // follows duration exactly, so the estimate is not a guess.
+        pcmBuffer = [];
+        await recorder.start((chunk) => {
+          if (!pcmBuffer || stopRequested) return;
+          pcmBuffer.push(chunk);
+          bufferedSamples += chunk.length;
+          const frac = Math.min(1, bufferedSamples / maxSamples);
+          recProgress.value = frac * 100;
+          const remainS = Math.max(
+            0,
+            (maxDurationMs / 1000) * (1 - frac),
+          ).toFixed(0);
+          recStatus.textContent = `${t('recording')} ${t('remaining', { s: remainS })}`;
+          if (bufferedSamples >= maxSamples) requestStop('capacity');
+        });
+      } else {
+        encoder = v2q.createEncoder({ bps: settings.bps, ecLevel: settings.ecLevel });
+        const enc = encoder;
+        await recorder.start((chunk) => {
+          if (encoder !== enc || stopRequested) return;
+          pcmQueue.push(chunk);
+          void drainQueue();
+        });
+      }
       recProgress.value = 0;
       recStatus.textContent = t('recording');
       refreshRecordButton();
     } catch {
       encoder = null;
+      pcmBuffer = null;
       createError.textContent = t('micError');
     }
   }
@@ -277,10 +377,13 @@ async function main(): Promise<void> {
       const maxSamples = Math.floor((maxMs / 1000) * 8000);
       const trimmed = pcm.length > maxSamples;
       const used = trimmed ? pcm.subarray(0, maxSamples) : pcm;
-      const payload = await v2q.encode(used, {
-        bps: settings.bps,
-        ecLevel: settings.ecLevel,
-      });
+      const payload = await v2q.encode(
+        settings.autoGain ? normalizePcm(used) : used,
+        {
+          bps: settings.bps,
+          ecLevel: settings.ecLevel,
+        },
+      );
       recStatus.textContent = trimmed
         ? t('trimmed', { sec: (maxMs / 1000).toFixed(1) })
         : '';

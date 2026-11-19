@@ -59,6 +59,32 @@ async function main(): Promise<void> {
   const { lib, browser } = await loadLibrary();
   const v2q = await lib.createVoice2Qr();
 
+  // Version-skew self-heal: during an update transition the service
+  // worker can serve the NEW app together with the PREVIOUS release's
+  // library (assets are cache-first), and that library has no readQr —
+  // every read then fails while version.json already matches the app,
+  // so checkForUpdate sees nothing to fix. Detect the skew directly
+  // and recover the same way: drop this app's caches, unregister the
+  // worker, reload once. (Hit in the field on the 1.3.0 rollout.)
+  if (typeof v2q.readQr !== 'function') {
+    if (sessionStorage.getItem('v2q-skew-reloaded') !== __APP_VERSION__) {
+      sessionStorage.setItem('v2q-skew-reloaded', __APP_VERSION__);
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        await Promise.all(
+          keys
+            .filter((k) => k.startsWith('voice2qr-') && k !== 'voice2qr-share')
+            .map((k) => caches.delete(k)),
+        );
+      }
+      const registration =
+        await navigator.serviceWorker?.getRegistration();
+      await registration?.unregister().catch(() => undefined);
+      window.location.reload();
+      return; // keep this skewed session inert while the reload lands
+    }
+  }
+
   // ----- settings UI -----
   const selLang = $<HTMLSelectElement>('sel-lang');
   const selBps = $<HTMLSelectElement>('sel-bps');
@@ -787,8 +813,16 @@ async function main(): Promise<void> {
           await stopCamera();
           await acceptPayload(payload, ecLevel);
         })
-        .catch(() => {
-          // QR_NOT_FOUND: keep scanning.
+        .catch((e: unknown) => {
+          // QR_NOT_FOUND is the routine "not in this frame" outcome:
+          // keep scanning. Anything else is a real failure (e.g. a
+          // version-skewed library missing readQr) — swallowing it
+          // would scan forever with no diagnosis, so stop and show it.
+          if (e instanceof lib.Voice2QrError && e.code === 'QR_NOT_FOUND') {
+            return;
+          }
+          void stopCamera();
+          readError.textContent = describeError(e);
         });
     }, 300);
   });

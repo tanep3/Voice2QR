@@ -18,7 +18,7 @@ import { applyI18n, setLang, t, type Lang } from './i18n.js';
 import { Recorder } from './recorder.js';
 import { importAudioFile } from './file-import.js';
 import { Player } from './player.js';
-import { printQrImage } from './print.js';
+import { printQrImage, printWidthMm } from './print.js';
 import { normalizePcm } from './gain.js';
 
 const CAPACITY: Record<Settings['ecLevel'], number> = {
@@ -152,6 +152,12 @@ async function main(): Promise<void> {
   chkGain.checked = settings.autoGain;
   chkGain.addEventListener('change', () => {
     settings.autoGain = chkGain.checked;
+    saveSettings(settings);
+  });
+  const selPrintWidth = $<HTMLSelectElement>('sel-print-width');
+  selPrintWidth.value = String(settings.printWidth);
+  selPrintWidth.addEventListener('change', () => {
+    settings.printWidth = selPrintWidth.value === '384' ? 384 : 576;
     saveSettings(settings);
   });
 
@@ -464,7 +470,7 @@ async function main(): Promise<void> {
     if (!currentPayload) return;
     const blob = await browser.payloadToPng(currentPayload, {
       ecLevel: settings.ecLevel,
-      modulePx: 10,
+      printWidth: settings.printWidth,
     });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -478,10 +484,10 @@ async function main(): Promise<void> {
     if (!currentPayload) return;
     const blob = await browser.payloadToPng(currentPayload, {
       ecLevel: settings.ecLevel,
-      modulePx: 20,
+      printWidth: settings.printWidth,
     });
     const url = URL.createObjectURL(blob);
-    printQrImage(url);
+    printQrImage(url, printWidthMm(settings.printWidth));
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   });
 
@@ -493,7 +499,7 @@ async function main(): Promise<void> {
     try {
       const blob = await browser.payloadToPng(currentPayload, {
         ecLevel: settings.ecLevel,
-        modulePx: 10,
+        printWidth: settings.printWidth,
       });
       const file = new File(
         [blob],
@@ -894,7 +900,7 @@ async function main(): Promise<void> {
     if (!readPayload) return;
     const blob = await browser.payloadToPng(readPayload, {
       ecLevel: readEcLevel ?? 'M',
-      modulePx: 10,
+      printWidth: settings.printWidth,
     });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -910,7 +916,7 @@ async function main(): Promise<void> {
     try {
       const blob = await browser.payloadToPng(readPayload, {
         ecLevel: readEcLevel ?? 'M',
-        modulePx: 10,
+        printWidth: settings.printWidth,
       });
       const file = new File(
         [blob],

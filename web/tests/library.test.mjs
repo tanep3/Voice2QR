@@ -158,3 +158,20 @@ test('payloadToQr beyond QR capacity is QR_TOO_LARGE', async () => {
     'QR_TOO_LARGE',
   );
 });
+
+test('printLayout picks the largest whole pixels-per-module that fits', async () => {
+  const { printLayout } = await import('../dist/browser.js');
+  // Standard case: 145 modules incl. quiet zone.
+  assert.deepEqual(printLayout(145, 384), { modulePx: 2, offsetPx: 47, canvasPx: 384 });
+  assert.deepEqual(printLayout(145, 576), { modulePx: 3, offsetPx: 70, canvasPx: 576 });
+  // Longest recording: 185 modules. T02 width fits 2 px/module with
+  // only 14 px to spare; M02S width fits 3 px/module.
+  assert.deepEqual(printLayout(185, 384), { modulePx: 2, offsetPx: 7, canvasPx: 384 });
+  assert.deepEqual(printLayout(185, 576), { modulePx: 3, offsetPx: 10, canvasPx: 576 });
+  // The QR plus its quiet zone always stays inside the canvas.
+  for (const [total, width] of [[145, 384], [145, 576], [185, 384], [185, 576], [25, 384]]) {
+    const l = printLayout(total, width);
+    assert.ok(l.modulePx >= 1);
+    assert.ok(l.offsetPx >= 0 && l.offsetPx + total * l.modulePx <= width);
+  }
+});

@@ -11,6 +11,12 @@ export interface Settings {
   ecLevel: 'L' | 'M' | 'Q' | 'H';
   /** Normalize a quiet recording up to a fixed peak before encoding. Default ON. */
   autoGain: boolean;
+  /**
+   * Printable dot width of the target thermal printer, for saved /
+   * shared / printed QR images: 384 (200 dpi class, e.g. T02) or
+   * 576 (300 dpi class, e.g. M02S). Default 576.
+   */
+  printWidth: 384 | 576;
 }
 
 const KEY = 'voice2qr-settings';
@@ -21,6 +27,7 @@ export function loadSettings(): Settings {
     bps: 1200,
     ecLevel: 'M',
     autoGain: true,
+    printWidth: 576,
   };
   try {
     const raw = localStorage.getItem(KEY);
@@ -35,6 +42,7 @@ export function loadSettings(): Settings {
           : 'M',
       // Absent in settings saved before this option existed: ON.
       autoGain: parsed.autoGain !== false,
+      printWidth: parsed.printWidth === 384 ? 384 : 576,
     };
   } catch {
     return defaults;

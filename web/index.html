@@ -136,6 +136,7 @@
     accent-color: #d63384; width: 16px; height: 16px; vertical-align: -2px; margin-right: 6px;
   }
   footer { margin-top: 22px; color: #a58cc4; font-size: 13px; text-align: center; font-weight: 600; }
+  .credit { margin-top: 6px; color: #b7a6d1; font-size: 12px; text-align: center; font-weight: 600; }
   #print-area { display: none; }
   @media print {
     body > *:not(#print-area) { display: none !important; }
@@ -237,9 +238,16 @@
     </select>
   </label>
   <label class="create-setting"><input id="chk-gain" type="checkbox" checked /><span data-i18n="autoGain">自動ゲイン調整（小さい声を持ち上げる）</span></label>
+  <label><span data-i18n="printWidth">印刷幅（プリンタ）</span>
+    <select id="sel-print-width">
+      <option value="384">384 (200 dpi)</option>
+      <option value="576">576 (300 dpi)</option>
+    </select>
+  </label>
 </details>
 
 <footer data-i18n="footer">処理はすべてこの端末の中で行います。録音データは保存されません。</footer>
+<div class="credit">© Tane Channel Technology</div>
 
 <div id="qr-modal" hidden>
   <canvas id="qr-big"></canvas>

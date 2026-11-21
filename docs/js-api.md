@@ -234,8 +234,9 @@ import { drawQr, payloadToPng, readPayloadFromImageData }
 
 | 関数 | 何をするか |
 |---|---|
-| `drawQr(canvas, matrix, options?)` | `QrMatrix` を canvas に描く（整数倍拡大、クワイエットゾーン付き）。`options.modulePx` で1モジュールの画素数、`options.quietZone` で余白のモジュール数（既定4） |
-| `payloadToPng(payload, options?)` | ペイロードから PNG の `Blob` を作る（保存・共有用） |
+| `drawQr(canvas, matrix, options?)` | `QrMatrix` を canvas に描く（整数倍拡大、クワイエットゾーン付き）。`options.modulePx` で1モジュールの画素数、`options.quietZone` で余白のモジュール数（既定4）。`options.printWidth` を渡すとプリンタ最適化描画になる（下記） |
+| `payloadToPng(payload, options?)` | ペイロードから PNG の `Blob` を作る（保存・共有用）。`options` は `drawQr` と同じ＋ `options.ecLevel` |
+| `printLayout(totalModules, targetWidth)` | プリンタ最適化描画の割り付けを返す純関数。キャンバス幅＝ `targetWidth`（プリンタの印字ドット幅、例： 384／576）、モジュールあたり画素数＝収まる最大の整数、オフセット＝中央寄せの整数画素。`drawQr`／`payloadToPng` に `printWidth` を渡すとこの割り付けで描く——受け側アプリの拡縮が 1.0 倍になり、全モジュールがプリンタのドットに一致する |
 | `readPayloadFromImageData(imageData)` | `ImageData` からペイロードを読む（`qrToPayload` のラッパ） |
 
 ## 5. エラー
